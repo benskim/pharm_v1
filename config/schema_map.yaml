@@ -9,6 +9,7 @@
 null_tokens: ["", "nan", "None", "NaN"]
 
 benefit:
+  row_no: [연번]
   product_code: [제품코드]          # 2025-11·12에 8자리 → lpad 9
   ingredient_code: [주성분코드]
   ingredient_name: [주성분명]
@@ -28,8 +29,19 @@ benefit:
   source_file: [소스파일명]
 
 substitute:
+  row_no: ["연번(급여목록상)"]
   product_code: [제품코드]
   ingredient_code: [주성분코드]
+  ingredient_name: [주성분명]
+  product_name: [제품명]
+  firm: [업체명]
+  route: [투여]
+  class_code: [분류]
+  spec: [규격]
+  unit: [단위]
+  rx_otc: [전일]
+  bioeq_date: ["생동인정 및 생동대조약 적용일"]
+  equiv: [의약동등]                 # 1 / 4 / 6. 4·6 ⇔ 생동대조약 ○ (S0)
   group_code: ["①주성분 및 투여제형코드", "①주성분 및투여제형코드"]   # 2022-10만 띄어쓰기 없는 이름
   item_code: ["②품목기준코드"]      # DOUBLE → bigint → 9자리 문자열
   rep_code: ["②대표코드"]           # DOUBLE → bigint → 13자리 문자열

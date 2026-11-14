@@ -54,3 +54,9 @@
 ## Claude Code가 추가한 결정
 | 2026-11-14 | `reference/precheck_v3.py`의 정렬 없는 쿼리 4곳에 ORDER BY를 추가했다. 값은 같고 행 순서만 고정된다 | 실행마다 동점 행 순서가 달라 회귀 비교가 흔들렸다 | 행 집합으로 비교 |
 | 2026-11-14 | `precheck_v3.py`의 F3 "대체조제 목록의 등재일 비고" 쿼리를 `order by 1`에서 `order by 1,2,3`으로 바꾸고, `precheck_v3_output.md`에서 그 표의 2025-11 두 행의 순서만 맞췄다. 값은 그대로다 (사용자 승인) | 같은 달 안의 행 순서가 정해지지 않아 재생성한 표본에서 diff가 났다. 정렬 전후 행 집합은 같았다 | 행 집합으로 비교 |
+| 2026-11-14 | S1 L1 테이블은 `data/interim/pbd.duckdb` 한 파일에 둔다 (약 0.9GB, git 제외) | DuckDB로 단계 간 공유. 재생성 1분 20초 | 테이블별 parquet |
+| 2026-11-14 | 미관측은 `stg_usage`(원본 행만, `observed = true`)가 아니라 `usage_c4_month`(성분4 × 96개월 격자, `observed_any`·`observed_out`, `first_observed_month`)로 표시한다 | 원본에 없는 칸을 행으로 만들면 0으로 오해될 수 있다. 비공개는 성분 단위 규칙 | stg_usage에 빈 칸 행 추가 |
+| 2026-11-14 | `attr_2026`은 `attr_2026_product`(제품코드 × 품목기준코드, code_map)와 `attr_2026_item`(품목기준코드, drug_info ∪ 오렌지북)으로 나눈다 | 키가 다르다. 시계열로 쓰지 않음 | 한 테이블 |
+| 2026-11-14 | 아는 토큰과 모르는 글자가 섞인 비고 조각은 조각 전체를 `unresolved` 하나로 둔다 (부분 토큰을 만들지 않는다) | 규칙 추측 금지. S1 전체 기간 unresolved 0건 | 아는 부분만 토큰화 |
+| 2026-11-14 | U6은 토큰 2개(R4 `arrow`, R5 `arrow`, 금액 176)로 나눈다. R3b는 `token_date`(시작)·`token_date_end`(종료)와 `is_future`·`is_future_end` | NOTE_RULES R5·R3b 결정을 토큰 단위로 표현 | |
+| 2026-11-14 | 대체조제 `ref_drug`·`bioeq`는 ○이면 true, 아니면 false(NULL 아님). 원문은 `bioeq_raw` | 원본 값이 ○ 또는 NULL 두 가지뿐 (S0) | NULL 유지 |

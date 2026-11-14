@@ -1,5 +1,6 @@
 # 단계 실행. 각 단계는 사용자가 지시할 때 구현한다 (CLAUDE.md "한 번에 한 단계").
 PY ?= .venv/bin/python
+export PYTHONPATH := src
 
 .PHONY: help venv sample s0 check-sample test \
         p1-s1 p1-s2 p1-s3 p1-s4 p1-s5 p1-s6 p1-s7 report \
@@ -26,7 +27,8 @@ s0-followup:
 # 표본으로 돌린 precheck 출력 = reference 출력
 check-sample:
 	$(PY) -I reference/precheck_v3.py data/sample > outputs/precheck_sample.md
-	diff outputs/precheck_sample.md reference/precheck_v3_output.md && echo "check-sample: 차이 없음"
+	diff outputs/precheck_sample.md reference/precheck_v3_output.md && echo "check-sample: precheck 차이 없음"
+	@if [ -f data/interim/pbd.duckdb ]; then $(PY) -m pytest -q tests/test_s1_integration.py -k "sample or f2"; fi
 
 test:
 	$(PY) -m pytest -q tests
@@ -35,7 +37,12 @@ define TODO
 	@echo "$@: 아직 구현하지 않은 단계 (prompts/STAGES.md)"; exit 1
 endef
 
-p1-s1 p1-s2 p1-s3 p1-s4 p1-s5 p1-s6 p1-s7:
+# P1 S1: L1 정규화 테이블 → data/interim/pbd.duckdb
+p1-s1:
+	$(PY) -m pbd.ledger.s1_load
+	$(PY) -m pytest -q tests/test_notes.py tests/test_s1_load.py tests/test_s1_integration.py
+
+p1-s2 p1-s3 p1-s4 p1-s5 p1-s6 p1-s7:
 	$(TODO)
 
 report:

@@ -12,3 +12,5 @@ data/raw/
 
 # 생성물
 outputs/precheck_sample.md
+*.duckdb
+*.duckdb.wal
