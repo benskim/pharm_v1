@@ -102,3 +102,21 @@ def test_usage_sido_merge_and_observed(con, tmp_path):
     obs = con.execute("select c4, month, observed_any, observed_out, first_observed_month from usage_c4_month order by c4, month").fetchall()
     assert obs == [("0101", "2024-01", True, True, "2024-01"), ("0101", "2024-02", True, True, "2024-01"),
                    ("0202", "2024-01", True, False, "2024-01"), ("0202", "2024-02", False, False, "2024-01")]   # 미관측 ≠ 0
+
+
+def test_row_kind_product_code_rule(con, tmp_path):
+    """숫자 8자리만 0을 채운다. 7자리 이하는 채우지 않는다. 0 채움 후 숫자 9자리가 아니면 non_product.
+    non_product 행은 stg에 남고 note_token에서 빠진다. (사용자 결정 2026-11-14)"""
+    rows = []
+    for i, code in enumerate(["642100010", "52300081", "1234567", "243001ACS"], 1):
+        rows.append(dict(연번=i, 투여="내복", 분류=214, 주성분코드="101301ATB", 제품코드=code, 제품명="가", 업체명="A",
+                         규격="1", 단위="정", 상한금액=100.0, 전일="전문", 비고="급여정지(22.9.5.)",
+                         목록정비전코드="nan", 주성분명="x", 소스파일명="f.xlsx", 기준일자="2022-09-01"))
+    p = _parquet(tmp_path, "benefit.parquet", rows)
+    L.build_stg_snapshot(con, "benefit", [p])
+    L.create_empty_stg(con, "substitute")
+    got = con.execute("select row_no, product_code, row_kind from stg_benefit order by row_no").fetchall()
+    assert got == [(1, "642100010", "product_candidate"), (2, "052300081", "product_candidate"),
+                   (3, "1234567", "non_product"), (4, "243001ACS", "non_product")]
+    L.build_note_token(con)
+    assert con.execute("select product_code from note_token order by 1").fetchall() == [("052300081",), ("642100010",)]

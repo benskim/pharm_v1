@@ -4,7 +4,10 @@ snapshot_inventory, stg_benefit, stg_substitute, stg_usage(+ usage_c4_month 관�
 note_token, attr_2026_product, attr_2026_item 을 data/interim/pbd.duckdb에 만든다.
 
 - 컬럼 대응은 config/schema_map.yaml. 후보 열 목록을 앞에서부터 coalesce 한다.
-- 결측 자리표시('', 'nan', 'None', 'NaN')는 NULL. 코드는 문자열, 제품코드 9자리·성분 4자리로 0을 채운다.
+- 결측 자리표시('', 'nan', 'None', 'NaN')는 NULL. 코드는 문자열.
+- 제품코드(DATA.md §4, DECISIONS 2026-11-14): 숫자 8자리만 앞에 0을 채워 9자리로 만든다. 7자리 이하는 채우지 않는다.
+  0 채움 후 숫자 9자리면 row_kind = 'product_candidate', 그 밖은 'non_product'.
+  non_product 행은 stg에 그대로 두고(원본 행 수 = stg 행 수), note_token·이후 원장에서 뺀다 (outputs/audit/dropped_s1_non_product.csv).
 - 원본 행은 버리지 않는다 (원본 행 수 = stg 행 수). 버린 행이 생기면 outputs/audit/dropped_s1_*.csv.
 - 사용통계는 원본 단위 그대로. 원본에 행이 없는 칸은 0이 아니라 미관측 (usage_c4_month.observed_*).
 
@@ -28,14 +31,14 @@ NULLS = tuple(SCHEMA.get("null_tokens", ["", "nan", "None", "NaN"]))
 # 출력 컬럼과 종류. 후보 원본 열은 schema_map.yaml
 SPEC = {
     "benefit": [
-        ("row_no", "int"), ("product_code", "code9"), ("ingredient_code", "text"), ("ingredient_name", "text"),
+        ("row_no", "int"), ("product_code", "pcode"), ("ingredient_code", "text"), ("ingredient_name", "text"),
         ("product_name", "text"), ("firm", "text"), ("route", "text"), ("class_code", "int"),
         ("mfds_class", "int"), ("n_ingredients", "int"), ("spec", "text"), ("unit", "text"),
         ("price", "double"), ("rx_otc", "text"), ("note", "text"), ("prev_code", "code9"),
         ("base_date", "date"), ("source_file", "text"),
     ],
     "substitute": [
-        ("row_no", "int"), ("product_code", "code9"), ("ingredient_code", "text"), ("ingredient_name", "text"),
+        ("row_no", "int"), ("product_code", "pcode"), ("ingredient_code", "text"), ("ingredient_name", "text"),
         ("product_name", "text"), ("firm", "text"), ("route", "text"), ("class_code", "int"),
         ("group_code", "text"), ("item_code", "code9"), ("rep_code", "code13"), ("prev_code", "code9"),
         ("spec", "text"), ("unit", "text"), ("price", "double"), ("rx_otc", "text"), ("sort_order", "int"),
@@ -45,7 +48,7 @@ SPEC = {
 }
 # 같은 원본 열을 다른 이름으로도 내보내는 것
 ALIAS_SOURCE = {"bioeq_raw": "bioeq"}
-SQLTYPE = {"text": "VARCHAR", "int": "BIGINT", "double": "DOUBLE", "code9": "VARCHAR", "code13": "VARCHAR",
+SQLTYPE = {"pcode": "VARCHAR", "text": "VARCHAR", "int": "BIGINT", "double": "DOUBLE", "code9": "VARCHAR", "code13": "VARCHAR",
            "date": "DATE", "flag": "BOOLEAN"}
 
 
@@ -54,9 +57,16 @@ def _text(col: str) -> str:
     return f"(case when {c} in {NULLS} then null else {c} end)"
 
 
+def _pcode(expr: str) -> str:
+    """제품코드: 문자열 그대로. 숫자 8자리만 앞에 0 하나를 채운다."""
+    return f"(case when regexp_full_match({expr}, '[0-9]{{8}}') then '0' || {expr} else {expr} end)"
+
+
 def _code(expr: str, width: int) -> str:
+    """실수형으로 저장된 코드('645101520.0', 8806519003301.0): '.0'을 떼고, 한 자리 모자랄 때만 0을 채운다.
+    숫자로 읽을 수 없으면 원문을 둔다."""
     num = f"cast(try_cast(try_cast({expr} as double) as bigint) as varchar)"
-    return f"coalesce(case when length({num}) >= {width} then {num} else lpad({num}, {width}, '0') end, {expr})"
+    return f"coalesce(case when length({num}) = {width - 1} then '0' || {num} else {num} end, {expr})"
 
 
 def _typed(expr: str, kind: str) -> str:
@@ -66,6 +76,8 @@ def _typed(expr: str, kind: str) -> str:
         return f"try_cast(try_cast({expr} as double) as bigint)"
     if kind == "double":
         return f"try_cast({expr} as double)"
+    if kind == "pcode":
+        return _pcode(expr)
     if kind == "code9":
         return _code(expr, 9)
     if kind == "code13":
@@ -99,7 +111,8 @@ def _select_for_file(con, lst: str, path) -> str:
 def build_stg_snapshot(con, lst: str, files) -> None:
     sql = " union all by name ".join(_select_for_file(con, lst, f) for f in files)
     con.execute(f"""create or replace table stg_{lst} as
-        select strftime(base_date, '%Y-%m') as list_month, *, substr(ingredient_code, 1, 4) as c4
+        select strftime(base_date, '%Y-%m') as list_month, *, substr(ingredient_code, 1, 4) as c4,
+               case when regexp_full_match(product_code, '[0-9]{{9}}') then 'product_candidate' else 'non_product' end as row_kind
         from ({sql}) order by list_month, product_code, src_file, src_row""")
 
 
@@ -107,7 +120,7 @@ def create_empty_stg(con, lst: str) -> None:
     cols = ", ".join(f"cast(null as {SQLTYPE[k]}) as {o}" for o, k in SPEC[lst])
     con.execute(f"""create or replace table stg_{lst} as select cast(null as varchar) list_month, {cols},
         cast(null as varchar) product_code_raw, cast(null as varchar) src_file, cast(null as bigint) src_row,
-        cast(null as varchar) c4 limit 0""")
+        cast(null as varchar) c4, cast(null as varchar) row_kind limit 0""")
 
 
 # ---------------------------------------------------------------- note_token
@@ -129,9 +142,11 @@ def build_note_token(con) -> None:
         from note_parse_df""")
     con.unregister("note_parse_df")
     con.execute("""create or replace table note_token as
-        with s as (select 'benefit' source_list, list_month, base_date, product_code, src_file, src_row, note from stg_benefit where note is not null
+        with s as (select 'benefit' source_list, list_month, base_date, product_code, src_file, src_row, note from stg_benefit
+                   where note is not null and row_kind = 'product_candidate'
                    union all
-                   select 'substitute', list_month, base_date, product_code, src_file, src_row, note from stg_substitute where note is not null)
+                   select 'substitute', list_month, base_date, product_code, src_file, src_row, note from stg_substitute
+                   where note is not null and row_kind = 'product_candidate')
         select s.source_list, s.list_month, s.base_date, s.product_code, p.seq, p.part, p.token_type, p.variant,
                p.token_date, p.token_date_end, p.amount, p.raw, s.note as note_raw,
                p.token_date > s.base_date as is_future, p.token_date_end > s.base_date as is_future_end,
@@ -188,21 +203,29 @@ def build_snapshot_inventory(con, files: dict, start: str, end: str) -> None:
             pieces.append(f"""select '{lst}' source_list, substr(cast(기준일자 as varchar),1,7) list_month,
                 list_filter([{nonblank}], lambda x: x is not null) cols from read_parquet('{Path(p).as_posix()}') group by 2""")
     con.execute("create or replace temp table inv_cols as " + " union all ".join(pieces))
+    agg = """count(*) n_rows, count(distinct product_code) n_products,
+                 count(*) filter (where regexp_full_match(product_code_raw, '[0-9]{8}')) n_code_padded,
+                 count(*) filter (where row_kind = 'non_product') n_non_product,
+                 count(note) n_note_rows, count(*) filter (where price is null) n_price_null"""
     con.execute(f"""create or replace table snapshot_inventory as
         with cal as (select strftime(d, '%Y-%m') list_month from range(cast('{start}-01' as date), cast('{end}-01' as date) + interval 1 month, interval 1 month) t(d)),
         lists as (select unnest(['benefit', 'substitute']) source_list),
         s as (select 'benefit' source_list, list_month, min(base_date) base_date, count(distinct base_date) n_base_dates,
-                     min(source_file) source_file, count(*) n_rows, count(distinct product_code) n_products,
-                     count(*) filter (where length(product_code_raw) = 8) n_code8, count(note) n_note_rows, count(*) filter (where price is null) n_price_null
-              from stg_benefit group by 2
+                     min(source_file) source_file, {agg} from stg_benefit group by 2
               union all
-              select 'substitute', list_month, min(base_date), count(distinct base_date), min(source_file), count(*), count(distinct product_code),
-                     count(*) filter (where length(product_code_raw) = 8), count(note), count(*) filter (where price is null)
-              from stg_substitute group by 2)
+              select 'substitute', list_month, min(base_date), count(distinct base_date), min(source_file), {agg}
+              from stg_substitute group by 2),
+        -- 원본 파일명에 적힌 건수와의 차이. 설명: 미래 날짜 등재 제품(BACKLOG X2) + non_product 행
+        fr as (select source_list, list_month, count(distinct product_code) n_future_listing
+               from note_token where token_type = 'R1' and is_future group by 1, 2)
         select lists.source_list, cal.list_month, s.list_month is null as missing, s.base_date, s.n_base_dates, s.source_file,
-               coalesce(s.n_rows, 0) n_rows, s.n_products, s.n_code8, s.n_note_rows, s.n_price_null,
+               coalesce(s.n_rows, 0) n_rows, s.n_products, s.n_code_padded, s.n_non_product, s.n_note_rows, s.n_price_null,
+               try_cast(replace(regexp_extract(s.source_file, '\\(([0-9,]+)\\)', 1), ',', '') as bigint) n_rows_in_filename,
+               s.n_rows - n_rows_in_filename as diff_vs_filename,
+               coalesce(fr.n_future_listing, 0) n_future_listing,
+               diff_vs_filename - coalesce(fr.n_future_listing, 0) - s.n_non_product as diff_unexplained,
                (select list_sort(flatten(list(c.cols))) from inv_cols c where c.source_list = lists.source_list and c.list_month = cal.list_month) columns_nonblank
-        from lists cross join cal left join s using (source_list, list_month)
+        from lists cross join cal left join s using (source_list, list_month) left join fr using (source_list, list_month)
         order by 1, 2""")
 
 
@@ -253,15 +276,26 @@ def main() -> None:
     for lst, fs in files.items():
         build_stg_snapshot(con, lst, fs)
         print(f"stg_{lst}: {con.execute(f'select count(*) from stg_{lst}').fetchone()[0]:,}행")
-    build_snapshot_inventory(con, files, p1["start_month"], p1["end_month"])
     build_note_token(con)
     print(f"note_token: {con.execute('select count(*) from note_token').fetchone()[0]:,}개")
+    build_snapshot_inventory(con, files, p1["start_month"], p1["end_month"])
     build_stg_usage(con, str(RAW / "usage" / "cmpn_stat_*" / "MEDICINE_*.csv"), SCHEMA["sido_merge"])
     print(f"stg_usage: {con.execute('select count(*) from stg_usage').fetchone()[0]:,}행")
     build_usage_obs(con, p2["start_month"], p2["end_month"])
     build_attr_2026(con, RAW / "master/dim_drug_code_map_26.parquet", RAW / "master/dim_drug_info_26.parquet",
                     RAW / "orangebook/dim_orange_book.parquet")
-    # 버린 행: S1은 원본 행을 버리지 않는다. 0건이라도 파일을 남긴다.
+    # 버린 행: stg에서는 버리지 않는다. non_product 행은 note_token과 이후 원장에서 뺀다.
+    rows, n_tok = [], 0
+    for lst in ("benefit", "substitute"):
+        for r in con.execute(f"""select list_month, src_file, src_row, product_code_raw, product_name, firm, note
+                                 from stg_{lst} where row_kind = 'non_product' order by 1, 2, 3""").fetchall():
+            k = len(parse_note(r[6]))
+            n_tok += k
+            rows.append((lst, *r[:6], k, "non_product: 0 채움 후 숫자 9자리가 아닌 제품코드. note_token·원장 제외"))
+    write_csv(AUDIT / "dropped_s1_non_product.csv",
+              ["source_list", "list_month", "src_file", "src_row", "product_code_raw", "product_name", "firm",
+               "n_tokens_excluded", "reason"], rows)
+    print(f"non_product 행 {len(rows)}개, note_token에서 뺀 토큰 {n_tok}개")
     for t in ("stg_benefit", "stg_substitute", "stg_usage"):
         write_csv(AUDIT / f"dropped_s1_{t}.csv", ["source", "reason", "n_rows"], [])
     # 숫자로 읽지 못해 원문을 그대로 둔 코드 (조용히 바꾸지 않는다)

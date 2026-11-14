@@ -44,15 +44,31 @@ def test_usage_rows_equal_raw(con):
 
 @pytest.mark.parametrize("lst", ["benefit", "substitute"])
 def test_codes_and_keys(con, lst):
-    bad = con.execute(f"select count(*) from stg_{lst} where length(product_code) <> 9 or length(c4) <> 4").fetchone()[0]
+    bad = con.execute(f"""select count(*) from stg_{lst} where row_kind = 'product_candidate'
+                          and (not regexp_full_match(product_code, '[0-9]{{9}}') or length(c4) <> 4)""").fetchone()[0]
     dup = con.execute(f"select count(*) from (select product_code, list_month from stg_{lst} group by all having count(*) > 1)").fetchone()[0]
     months = con.execute(f"select count(distinct list_month) from stg_{lst}").fetchone()[0]
     assert (bad, dup, months) == (0, 0, 48)
 
 
+@pytest.mark.parametrize("lst", ["benefit", "substitute"])
+def test_row_kind_counts_match_raw(con, lst):
+    """non_product 행 수 = 원본에서 숫자 8·9자리가 아닌 제품코드 행 수 (원본을 직접 센다)."""
+    src = f"read_parquet('{(RAW / lst).as_posix()}/{lst}_snapshot_table_*.parquet', union_by_name=true)"
+    want = raw_count(f"(select * from {src} where not regexp_full_match(coalesce(trim(제품코드), ''), '[0-9]{{8,9}}'))")
+    got = con.execute(f"select count(*) from stg_{lst} where row_kind = 'non_product'").fetchone()[0]
+    assert got == want
+
+
+def test_note_token_excludes_non_product(con):
+    n = con.execute("""select count(*) from note_token t join stg_benefit s using (src_file, src_row)
+                       where t.source_list = 'benefit' and s.row_kind = 'non_product'""").fetchone()[0]
+    assert n == 0
+
+
 def test_every_note_row_has_token(con):
     for lst in ("benefit", "substitute"):
-        n = con.execute(f"""select count(*) from stg_{lst} s where note is not null and not exists
+        n = con.execute(f"""select count(*) from stg_{lst} s where note is not null and row_kind = 'product_candidate' and not exists
             (select 1 from note_token t where t.source_list = '{lst}' and t.src_file = s.src_file and t.src_row = s.src_row)""").fetchone()[0]
         assert n == 0
 
