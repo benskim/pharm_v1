@@ -7,16 +7,43 @@
 | `data/raw/benefit/` | 약제급여목록 월 스냅샷 | 2022-01 ~ 2025-12 | P1, P2 특징 | 원본 형식 그대로 (병합 parquet 또는 월별 xlsx) |
 | `data/raw/substitute/` | 저가약 대체조제 목록 월 스냅샷 | 2022-01 ~ 2025-12 | P1 | 같음 |
 | `data/raw/usage/` | 건보공단 의약품 사용통계 **원본 집계파일** | 2018-01 ~ 2025-12 | P1 검증, P2 목표 변수 | 받은 형식 그대로 |
-| `data/raw/master/` | `dim_drug_master_20260831`, `dim_drug_info`, `dim_generic_master` | 최신본 | P1 연결 | |
-| `data/raw/price_2026/` | 2026 최신 약가정보 (심평원 버전, 의약품안전나라 버전) | 최신본 1개씩 | 속성표 | 시계열로 쓰지 않음 |
-| `data/raw/orangebook/` | 오렌지북(복제약) 2026 최신 | 최신본 | 오리지널·제네릭 구분 | 시계열로 쓰지 않음 |
-| `data/sample/` | 설계에 쓴 표본 parquet 8개 (파일명 그대로) | 2024-01 ~ 2025-12 | 회귀 시험 | `fact_cmpn_stat_2023~2025`는 사용자가 원본을 가공한 집계본 |
+| `data/raw/master/` | 2026 약가정보 2종. `dim_drug_code_map_26` (심평원 버전 = 설계 때의 `dim_drug_master_20260831`과 같은 파일), `dim_drug_info_26` (의약품안전나라 버전 = 설계 때의 `dim_drug_info`) | 최신본 | P1 연결, 속성표 | 시계열로 쓰지 않음 |
+| `data/raw/price_2026/` | 비어 있음. 약가정보 2종은 `master/`에 있다 | | | |
+| `data/raw/orangebook/` | 오렌지북(복제약) 2026 최신. `dim_orange_book` (= 설계 때의 `dim_generic_master`) | 최신본 | 오리지널·제네릭 구분 | 시계열로 쓰지 않음 |
+| `data/sample/` | 설계에 쓴 표본 parquet 8개 (설계 때 파일명) | 2024-01 ~ 2025-12 | 회귀 시험 | `fact_cmpn_stat_2023~2025`는 사용자가 원본을 가공한 집계본 |
 
-표본 파일: `benefit_snapshot_table_2425.parquet`, `substitute_snapshot_table_2425.parquet`, `fact_cmpn_stat_2023.parquet`, `fact_cmpn_stat_2024.parquet`, `fact_cmpn_stat_2025.parquet`, `dim_drug_master_20260831.parquet`, `dim_drug_info.parquet`, `dim_generic_master.parquet`.
+표본 파일: `benefit_snapshot_table_2425.parquet`, `substitute_snapshot_table_2425.parquet`, `fact_cmpn_stat_2023.parquet`, `fact_cmpn_stat_2024.parquet`, `fact_cmpn_stat_2025.parquet`, `dim_drug_master_20260831.parquet`, `dim_drug_info.parquet`, `dim_generic_master.parquet`. `precheck_v3.py`는 파일명 키워드(`benefit_snapshot`, `substitute_snapshot`, `dim_drug_master`, `fact_cmpn_stat_`)로 찾으므로 표본 폴더에서는 설계 때 파일명을 쓴다.
+
+**원본 파일명 대응** (2026-11-14 배치 기준)
+| 설계 때 이름 | `data/raw/` 실제 파일 |
+|---|---|
+| `dim_drug_master_20260831` | `master/dim_drug_code_map_26.parquet` |
+| `dim_drug_info` | `master/dim_drug_info_26.parquet` |
+| `dim_generic_master` | `orangebook/dim_orange_book.parquet` |
+| 급여목록 스냅샷 | `benefit/benefit_snapshot_table_2223.parquet`, `_2425.parquet` |
+| 대체조제 스냅샷 | `substitute/substitute_snapshot_table_2223.parquet`, `_2425.parquet` |
+| 사용통계 원본 | `usage/cmpn_stat_YYYY(공개일)/MEDICINE_YYYYMM (공개일).csv` 96개 + 스키마 `usage/cmpn_scheme(2025.2.4.).xlsx` |
 
 ## 2. 사용통계 (건보공단)
 
-**원본 집계 단위**: 처방 연월 × 성분 4자리 × 연령(10세 단위) × 시도 × 요양기관종별 × 원내외. 값은 청구건수, 환자수, 청구수량, 청구금액.
+**원본 집계 단위**: 처방 연월 × 성분 4자리 × 연령(10세 단위) × **성별** × 시도 × 요양기관종별 × 원내외. 값은 청구건수, 환자수, 청구수량, 청구금액.
+
+**원본 컬럼** (`cmpn_scheme(2025.2.4.).xlsx`, 96개 파일 헤더 동일, UTF-8 CSV)
+| 컬럼 | 뜻 | 값 |
+|---|---|---|
+| `STD_YYYYMM` | 처방년월 | YYYYMM |
+| `WK_COMPN_4` | 주성분코드 (성분 4자리) | 문자열 4자리 |
+| `AGE_G` | 연령대 | 0, 10, …, 90 (10세 단위) |
+| `SEX_TYPE` | 성별 | 남성 1, 여성 2 |
+| `SIDO` | 시도코드 (요양기관 주소) | 11 서울, 26 부산, 27 대구, 28 인천, 29 광주, 30 대전, 31 울산, 36 세종, 41 경기, 42 강원도, 43 충북, 44 충남, 45 전라북도, 46 전남, 47 경북, 48 경남, 50 제주, 51 강원특별자치도, 52 전북특별자치도 |
+| `YOYANG_CLSFC_CD_ADJ` | 요양기관그룹 | 병원 이상 1, **의원 3**, 보건기관 7 |
+| `OUT_IN_HOS` | 원내원외구분 | IN, OUT |
+| `PRSCRPTN_TNDN_CNT` | 총 처방 건수 (명세서 건수) | |
+| `PRSCRPTN_AMT` | 총 금액 (원) | |
+| `PATIENT_CNT` | 총 환자 수 (칸 안에서 중복 제거) | 칸끼리 더하면 중복이 생긴다 |
+| `PRSCRPTN_TOT_USE` | 총 처방량 | **생산·유통 단위(제품 개수)**. 투약 단위가 아니다 (사용자 확인 2026-11-14). 성분 안에서 규격이 다른 제품이 섞이면 수량끼리 단순 비교할 때 주의 |
+
+**시도 코드 변경**: 강원 42(~2023-12) → 51(2024-01~), 전북 45(~2024-12) → 52(2025-01~). 행정단위 명칭 변경일 뿐 같은 지역이므로 **하나의 시도로 잇는다** (51→42, 52→45로 묶은 `sido_std`). 원본 코드는 `sido_raw`로 보존한다.
 
 **비공개 규칙**: 처방 연월 기준 품목 수 또는 업체 수가 2개 이하인 성분(4자리)은 결과에서 제외되어 있다.
 
@@ -30,6 +57,7 @@
 
 **가공본 `fact_cmpn_stat` 컬럼** (표본, 월 × 성분 4자리 × 원내외): `STD_YYYYMM`, `WK_COMPN_4`, `OUT_IN_HOS`, `PRSCRPTN_TNDN_CNT`, `PRSCRPTN_AMT`, `PATIENT_CNT`, `PRSCRPTN_TOT_USE`.
 - 원본을 같은 단위로 다시 집계한 결과가 가공본과 같아야 한다 (S0 회귀 시험). 환자수는 칸끼리 더하면 중복이 생기므로 비교에서 제외하거나 별도로 표시한다.
+- **설계 때의 가공본은 남아 있지 않다.** `data/sample/fact_cmpn_stat_2023~2025`는 2026-11-14 `scripts/build_sample.py`로 원본에서 다시 만들었다. 따라서 원본 대 가공본 대조는 예전 가공 과정의 검증이 아니라 재집계 코드의 일관성 확인이다. 독립 기준은 `reference/precheck_v3_output.md`의 숫자다.
 
 ## 3. 스냅샷 컬럼 (표본 기준)
 - 급여목록: 연번, 투여, 분류, 주성분코드, 제품코드, 제품명, 업체명, 규격, 단위, 상한금액, 전일, 비고, 목록정비전코드, 주성분명, 소스파일명, 기준일자, 식약분류, 주성분개수

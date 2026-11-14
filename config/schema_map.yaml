@@ -32,17 +32,22 @@ substitute:
   base_date: [기준일자]
   # TODO: 2022~2023 파일의 컬럼 변형
 
-usage_raw:            # 건보공단 사용통계 원본. 전부 S0에서 확인
-  month: [TODO]
-  ingredient_c4: [TODO]
-  age_band: [TODO]
-  sido: [TODO]
-  inst_type: [TODO]
-  in_out: [TODO]
-  claim_cnt: [TODO]
-  patient_cnt: [TODO]
-  claim_qty: [TODO]
-  claim_amt: [TODO]
+usage_raw:            # 건보공단 사용통계 원본. 근거: data/raw/usage/cmpn_scheme(2025.2.4.).xlsx
+  month: [STD_YYYYMM]
+  ingredient_c4: [WK_COMPN_4]
+  age_band: [AGE_G]
+  sex: [SEX_TYPE]                  # 1 남, 2 여
+  sido: [SIDO]
+  inst_type: [YOYANG_CLSFC_CD_ADJ] # 1 병원 이상, 3 의원, 7 보건기관
+  in_out: [OUT_IN_HOS]
+  claim_cnt: [PRSCRPTN_TNDN_CNT]
+  patient_cnt: [PATIENT_CNT]
+  claim_qty: [PRSCRPTN_TOT_USE]
+  claim_amt: [PRSCRPTN_AMT]
+
+sido_merge:           # 같은 지역의 코드 변경. 사용자 결정 2026-11-14
+  "51": "42"          # 강원특별자치도 (2024-01~) → 강원
+  "52": "45"          # 전북특별자치도 (2025-01~) → 전북
 
 usage_sample:         # 사용자 가공본 fact_cmpn_stat (월 × 성분4 × 원내외)
   month: [STD_YYYYMM]
