@@ -42,7 +42,12 @@ p1-s1:
 	$(PY) -m pbd.ledger.s1_load
 	$(PY) -m pytest -q tests/test_notes.py tests/test_s1_load.py tests/test_s1_integration.py
 
-p1-s2 p1-s3 p1-s4 p1-s5 p1-s6 p1-s7:
+# P1 S2: 상태·속성·연결 → product_state_month 등 (data/interim/pbd.duckdb), 보고용 표 outputs/s2/
+p1-s2:
+	$(PY) -m pbd.ledger.s2_state
+	$(PY) -m pytest -q tests/test_state_rules.py tests/test_s2_synthetic.py tests/test_s2_integration.py
+
+p1-s3 p1-s4 p1-s5 p1-s6 p1-s7:
 	$(TODO)
 
 report:

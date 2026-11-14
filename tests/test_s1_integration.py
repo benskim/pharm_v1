@@ -139,3 +139,20 @@ def test_inventory_complete(con):
     # 2022-11 급여목록은 분류 대신 식약분류
     cols = con.execute("select columns_nonblank from snapshot_inventory where source_list='benefit' and list_month='2022-11'").fetchone()[0]
     assert "식약분류" in cols and "분류" not in cols
+
+
+def test_diff_direction_matches_raw_filename(con):
+    """snapshot_inventory.diff_direction = 원본 행 수와 원본 파일명 건수 '(25,054)'의 대소 (원본을 직접 읽는다)."""
+    src = f"read_parquet('{(RAW / 'benefit').as_posix()}/benefit_snapshot_table_*.parquet', union_by_name=true)"
+    c = duckdb.connect()
+    try:
+        want = c.execute(f"""select substr(cast(기준일자 as varchar), 1, 7) m, count(*) n,
+                   any_value(try_cast(replace(regexp_extract(소스파일명, '\\(([0-9,]+)\\)', 1), ',', '') as bigint)) k
+            from {src} group by 1""").fetchall()
+    finally:
+        c.close()
+    want = {m: ("rows_gt_filename" if n > k else "filename_gt_rows" if n < k else "equal")
+            for m, n, k in want if k is not None}
+    got = dict(con.execute("""select list_month, diff_direction from snapshot_inventory
+                              where source_list = 'benefit' and n_rows_in_filename is not null""").fetchall())
+    assert got == want

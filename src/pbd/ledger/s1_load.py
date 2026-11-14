@@ -224,6 +224,8 @@ def build_snapshot_inventory(con, files: dict, start: str, end: str) -> None:
                s.n_rows - n_rows_in_filename as diff_vs_filename,
                coalesce(fr.n_future_listing, 0) n_future_listing,
                diff_vs_filename - coalesce(fr.n_future_listing, 0) - s.n_non_product as diff_unexplained,
+               case when diff_vs_filename > 0 then 'rows_gt_filename' when diff_vs_filename < 0 then 'filename_gt_rows'
+                    when diff_vs_filename = 0 then 'equal' end as diff_direction,
                (select list_sort(flatten(list(c.cols))) from inv_cols c where c.source_list = lists.source_list and c.list_month = cal.list_month) columns_nonblank
         from lists cross join cal left join s using (source_list, list_month) left join fr using (source_list, list_month)
         order by 1, 2""")
@@ -236,7 +238,7 @@ def build_attr_2026(con, code_map, drug_info, orange) -> None:
         select lpad(cast(cast({q('제품코드(개정후)')} as bigint) as varchar), 9, '0') product_code,
                lpad(cast(품목기준코드 as varchar), 9, '0') item_code,
                min(cast(대표코드 as varchar)) rep_code, count(distinct 표준코드) n_std_codes,
-               min({q('일반명코드(성분명코드)')}) generic_code, min({q('국제표준코드(ATC코드)')}) atc,
+               min({q('일반명코드(성분명코드)')}) ingredient_code, min({q('국제표준코드(ATC코드)')}) atc,
                min(한글상품명) product_name, min(업체명) firm, min(전문일반구분) rx_otc,
                max(취소일자) cancel_date, max({q('양도양수적용(공고)일자')}) transfer_date, max(양도양수종료일자) transfer_end_date
         from read_parquet('{Path(code_map).as_posix()}') where {q('제품코드(개정후)')} is not null

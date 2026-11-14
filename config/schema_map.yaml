@@ -41,7 +41,7 @@ substitute:
   unit: [단위]
   rx_otc: [전일]
   bioeq_date: ["생동인정 및 생동대조약 적용일"]
-  equiv: [의약동등]                 # 1 / 4 / 6. 4·6 ⇔ 생동대조약 ○ (S0)
+  equiv: [의약동등]                 # 1 생동인정 공고, 4 생동대조약 공고, 6 둘 다 (사용자 제공). 4·6 ⇔ 생동대조약 ○ (S0)
   group_code: ["①주성분 및 투여제형코드", "①주성분 및투여제형코드"]   # 2022-10만 띄어쓰기 없는 이름
   item_code: ["②품목기준코드"]      # DOUBLE → bigint → 9자리 문자열
   rep_code: ["②대표코드"]           # DOUBLE → bigint → 13자리 문자열
@@ -86,7 +86,7 @@ price_2026:
     item_code: [품목기준코드]
     rep_code: [대표코드]
     std_code: [표준코드]
-    generic_code: ["일반명코드(성분명코드)"]
+    ingredient_code: ["일반명코드(성분명코드)"]   # 값은 급여목록 주성분코드와 같은 체계 (S2 전 확인: 연결 21,601쌍 모두 일치)
     atc: ["국제표준코드(ATC코드)"]
     cancel_date: [취소일자]
     transfer_date: ["양도양수적용(공고)일자"]
@@ -99,5 +99,5 @@ price_2026:
     atc: [ATC코드]
 orangebook:           # data/raw/orangebook/dim_orange_book.parquet (= dim_generic_master)
   item_code: [기준코드]                # 품목기준코드로 연결. 23,518행, 고유 19,630
-  generic_flag: [제네릭의약품]         # 'O' / NULL
+  ob_generic: [제네릭의약품]           # 'O' / NULL. 원본 칸 보존용, 판정에 쓰지 않음 (DECISIONS 2026-11-14 4차)
   ref_drug_flag: [공고대조약]          # 'O' / NULL

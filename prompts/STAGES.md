@@ -40,7 +40,7 @@ reports/S0_result.md와 내가 단 답을 읽고 P1 S1만 수행해. 설계는 d
 P1 S2만 수행해. product_state_month, product_attr_scd2, bridge_product_item, bridge_code_recode, 오렌지북 연결과 product_role(reference / bioequiv / NULL, role_source, is_bioequiv, role_conflict). 출처별 원본 값(대체조제 생동대조약 여부·생동인정여부·의약동등, 오렌지북 공고대조약·제네릭의약품 표시)은 별도 컬럼. row_kind = non_product 행은 제외하고 버린 행 기록에 남긴다.
 - 상태 판정은 docs/PLAN_P1.md §4의 state 표.
 - 합성 스냅샷 테스트: 등재 예정(처음 관측 / 기존 제품), 월중 급여정지, 정지 중 삭제, 집행정지 중 가격 변화, 산정불가의 두 위치, 기간 명시 정지(종료일 뒤 비고가 남아도 복귀), 종료일 없는 정지의 복귀(1개월 공백 후 재등장 = 이벤트 없음 / 두 목록 모두 2개월 연속 공백 = 복귀, 첫 달 고쳐 쓰기 / 분석 끝 1개월 공백 = 미확정), 창 시작 전 집행정지(stay_flag만, STAY_START 없음).
-- 완료 기준은 §6의 S2. 연결률을 연도별·삭제 여부별·경로별(code_map / ②품목기준코드)로 보고한다. is_original은 쓰지 않는다. 컬럼 이름·값·표 이름에 "오리지널", "제네릭"을 쓰지 않는다. product_role 역할별 제품 수(연도별·삭제 여부별·role_source별)와 role_conflict 건수·사례를 보고한다. 제품×월 행 수 = 원본 행 수 − non_product 행 수.
+- 완료 기준은 §6의 S2. 연결률을 연도별·삭제 여부별·경로별(code_map / ②품목기준코드)로 보고한다. is_original은 쓰지 않는다. 컬럼 이름·값·표 이름에 "오리지널", "제네릭"을 쓰지 않는다 (원본 칸 보존 컬럼 `ob_generic`은 예외, 판정에 쓰지 않음). product_role은 제품×월로 판정한다. product_role 역할별 제품 수(연도별·삭제 여부별·role_source별)와 role_conflict 건수·사례를 보고한다. 제품×월 행 수 = 원본 행 수 − non_product 행 수.
 ```
 
 ### S3 신호·이벤트 원장
