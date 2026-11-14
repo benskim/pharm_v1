@@ -1,14 +1,16 @@
 """P1 S2: 상태·속성·연결 (docs/PLAN_P1.md §4, 완료 기준 §6 S2).
 
 data/interim/pbd.duckdb의 L1 테이블에서 다음을 만든다.
-- product_state_month : 급여목록 제품×월 (row_kind = product_candidate 행만). state, exposure_frac, 고쳐 쓰기 표시,
+- product_state_month : 급여목록 제품×월 (row_kind = product_candidate 행만). state_asof(기준일 시점)·state_eom(월말),
+                        exposure_frac(월말 기준), 고쳐 쓰기 표시,
                         stay_flag, price_pending, 대체조제 목록 여부, product_role, 출처별 원본 값
 - product_attr_scd2   : 업체명·제품명·주성분코드의 유효 구간 (급여목록 관측 달 기준)
 - bridge_product_item : 제품코드 → 품목기준코드 (경로 code_map / substitute)
 - bridge_code_recode  : 목록정비전코드(옛 코드) → 제품코드(새 코드)
 
 - 날짜 규칙(등재 예정·급여정지·복귀)은 pbd.ledger.state_rules.derive (순수 함수)
-- state 우선순위: scheduled_listing > suspended > unpriced > reimbursed. delisted는 행으로 만들지 않는다
+- state_asof는 그 스냅샷까지의 정보만, state_eom은 이후 스냅샷으로 확인된 것까지 쓴다 (state_rules).
+- state 우선순위 (두 컬럼 모두): scheduled_listing > suspended > unpriced > reimbursed. delisted는 행으로 만들지 않는다
   (행 = 관측된 스냅샷 행. 삭제는 absent_next_month로 표시하고 이벤트는 S3)
 - 버린 행: non_product 행 → outputs/audit/dropped_s2_non_product.csv.
   대체조제 목록에만 있고 같은 달 급여목록에 없는 행 → outputs/audit/s2_substitute_only_rows.csv
@@ -51,17 +53,20 @@ def build_state_override(con) -> None:
         res = derive(months_by[pc], cal, toks[pc], last_month)
         for m, o in res.items():
             rows.append((pc, m, o.scheduled, o.suspended, o.exposure_frac, o.exposure_revised, o.state_revised,
-                         o.resume_unconfirmed, o.listing_date, o.suspend_date, o.note))
+                         o.late_note_revised, o.resume_unconfirmed, o.listing_date, o.suspend_date, o.note,
+                         o.asof_scheduled, o.asof_suspended, o.asof_suspend_date))
     df = pd.DataFrame(rows, columns=["product_code", "list_month", "scheduled", "suspended", "exposure_frac",
-                                     "exposure_revised", "state_revised", "resume_unconfirmed", "listing_date",
-                                     "suspend_date", "rule_note"])
-    df["listing_date"] = pd.to_datetime(df["listing_date"])
-    df["suspend_date"] = pd.to_datetime(df["suspend_date"])
+                                     "exposure_revised", "state_revised", "late_note_revised", "resume_unconfirmed",
+                                     "listing_date", "suspend_date", "rule_note",
+                                     "asof_scheduled", "asof_suspended", "asof_suspend_date"])
+    for c in ("listing_date", "suspend_date", "asof_suspend_date"):
+        df[c] = pd.to_datetime(df[c])
     con.register("_ov", df)
     con.execute("""create or replace table s2_state_override as
         select product_code, list_month, scheduled, suspended, cast(exposure_frac as double) exposure_frac,
-               exposure_revised, state_revised, resume_unconfirmed, cast(listing_date as date) listing_date,
-               cast(suspend_date as date) suspend_date, rule_note from _ov order by 1, 2""")
+               exposure_revised, state_revised, late_note_revised, resume_unconfirmed, cast(listing_date as date) listing_date,
+               cast(suspend_date as date) suspend_date, rule_note, asof_scheduled, asof_suspended,
+               cast(asof_suspend_date as date) asof_suspend_date from _ov order by 1, 2""")
     con.unregister("_ov")
 
 
@@ -137,7 +142,7 @@ def build_attr_scd2(con) -> None:
 
 # ---------------------------------------------------------------- 제품×월
 def build_product_state_month(con) -> None:
-    con.execute("""create or replace table product_state_month as
+    con.execute("""create or replace temp table _psm as
         with cal as (select list_month, min(base_date) base_date,
                             lead(list_month) over (order by list_month) next_month from stg_benefit group by 1),
              b as (select * from stg_benefit where row_kind = 'product_candidate'),
@@ -158,18 +163,24 @@ def build_product_state_month(con) -> None:
                            count(distinct (token_date, amount)) n_pending_values
                     from note_token where token_type = 'R2' and is_future group by 1, 2)
         select b.product_code, b.list_month, b.base_date, b.c4, b.ingredient_code, b.firm, b.product_name, b.class_code,
+               case when ov.asof_scheduled then 'scheduled_listing'
+                    when ov.asof_suspended then 'suspended'
+                    when coalesce(tk.has_r7, false) or b.price is null then 'unpriced'
+                    else 'reimbursed' end state_asof,
                case when ov.scheduled then 'scheduled_listing'
                     when ov.suspended then 'suspended'
                     when coalesce(tk.has_r7, false) or b.price is null then 'unpriced'
-                    else 'reimbursed' end state,
+                    else 'reimbursed' end state_eom,
                b.price price_listed, pp.price_pending, pp.pending_date, pp.pending_source, pp.n_pending_values,
                coalesce(tk.has_r4, false) and not coalesce(tk.r5_past, false) stay_flag,
                case when coalesce(tk.has_r4, false) and not coalesce(tk.r5_past, false) then tk.stay_date end stay_date,
                coalesce(ov.exposure_frac, 1.0) exposure_frac,
                coalesce(ov.exposure_revised, false) exposure_revised,
                coalesce(ov.state_revised, false) state_revised,
+               coalesce(ov.late_note_revised, false) late_note_revised,
                coalesce(ov.resume_unconfirmed, false) resume_unconfirmed,
                ov.listing_date, case when ov.suspended then ov.suspend_date end suspend_date,
+               case when ov.asof_suspended then ov.asof_suspend_date end asof_suspend_date,
                case when coalesce(tk.has_r7, false) and b.price is null then 'note+price_null'
                     when coalesce(tk.has_r7, false) then 'note' when b.price is null then 'price_null' end unpriced_evidence,
                case when cal.next_month is not null then bn.has_next is null end absent_next_month,
@@ -179,8 +190,7 @@ def build_product_state_month(con) -> None:
                          case when s.ref_drug then 'reference' when s.bioeq then 'bioequiv' end
                     when lk.ob_ref then 'reference' end product_role,
                case when s.product_code is not null then
-                         case when s.ref_drug or s.bioeq then 'substitute' end
-                    when lk.ob_ref then 'orangebook' end role_source,
+                         case when s.ref_drug then 'reference' when s.bioeq then 'bioequiv' end end sub_role,
                case when s.product_code is not null then s.bioeq end is_bioequiv,
                case when s.product_code is not null and lk.ob_link_path is not null then s.ref_drug <> lk.ob_ref end role_conflict,
                -- 출처별 원본 값 (판정 컬럼과 별도)
@@ -194,8 +204,59 @@ def build_product_state_month(con) -> None:
         left join tk using (product_code, list_month)
         left join pp using (product_code, list_month)
         left join s2_state_override ov using (product_code, list_month)
-        left join s2_product_link lk using (product_code)
-        order by b.list_month, b.product_code""")
+        left join s2_product_link lk using (product_code)""")
+    # product_role_carried: 그 달 대체조제 값 → 없으면 과거 달의 대체조제 값(앞으로만 이어 씀) → 오렌지북 공고대조약
+    con.execute("""create or replace table product_state_month as
+        with c as (select *, last_value(sub_role ignore nulls) over (partition by product_code order by list_month
+                                 rows between unbounded preceding and 1 preceding) prev_sub_role from _psm)
+        select * exclude (sub_role, prev_sub_role, product_role_carried, role_source, ob_link_path, ob_ref, ob_generic,
+                          item_code, item_link_path, src_file, src_row),
+               product_role_carried, role_source,
+               item_code, item_link_path, ob_link_path, ob_ref, ob_generic, src_file, src_row
+        from (select *,
+                     case when in_substitute_list then sub_role
+                          when prev_sub_role is not null then prev_sub_role
+                          when ob_ref then 'reference' end product_role_carried,
+                     case when in_substitute_list and sub_role is not null then 'observed'
+                          when not in_substitute_list and prev_sub_role is not null then 'carried'
+                          when not in_substitute_list and ob_ref then 'orangebook' end role_source
+              from c)
+        order by list_month, product_code""")
+    con.execute("drop table _psm")
+
+
+# ---------------------------------------------------------------- 신호 확인 근거 (S3 입력)
+def build_signal_checks(con) -> None:
+    """미래 날짜 정지 토큰(R3·R3b 시작일)마다 확인 스냅샷과 결과·사유를 남긴다 (S3 signal_outcome의 근거).
+    confirm_status: confirmed / not_confirmed / unconfirmable(정지 기간이 확인 스냅샷 전에 끝남) / censored(확인 스냅샷 없음)
+    reason (확인 안 된 것): ended_before_check / product_absent / stay(확인 스냅샷에 집행정지 비고) / token_gone
+    """
+    con.execute("""create or replace table s2_suspend_signal_check as
+        with cal as (select list_month, min(base_date) base from stg_benefit group by 1),
+             f as (select product_code, list_month signal_month, token_type, token_date, token_date_end,
+                          list_sort(list(distinct source_list)) source_lists, min(raw) raw
+                   from note_token where token_type in ('R3', 'R3b') and is_future group by 1, 2, 3, 4, 5),
+             j as (select f.*, (select min(list_month) from cal where base >= f.token_date) check_month from f),
+             k as (select j.*, c.base check_base,
+                          exists (select 1 from note_token t where t.product_code = j.product_code and t.list_month = j.check_month
+                                  and t.token_type = j.token_type and t.token_date = j.token_date
+                                  and t.token_date_end is not distinct from j.token_date_end) token_in_check,
+                          exists (select 1 from stg_benefit b where b.product_code = j.product_code and b.list_month = j.check_month
+                                  and b.row_kind = 'product_candidate') product_in_check,
+                          exists (select 1 from note_token t where t.product_code = j.product_code and t.list_month = j.check_month
+                                  and t.token_type = 'R4') stay_in_check,
+                          exists (select 1 from note_token t where t.product_code = j.product_code and t.list_month = j.signal_month
+                                  and t.token_type = 'R4') stay_in_signal_month
+                   from j left join cal c on c.list_month = j.check_month)
+        select *,
+               case when check_month is null then 'censored' when token_in_check then 'confirmed'
+                    when token_type = 'R3b' and token_date_end < check_base then 'unconfirmable'
+                    else 'not_confirmed' end confirm_status,
+               case when check_month is null or token_in_check then null
+                    when token_type = 'R3b' and token_date_end < check_base then 'ended_before_check'
+                    when not product_in_check then 'product_absent'
+                    when stay_in_check then 'stay' else 'token_gone' end reason
+        from k order by signal_month, product_code, token_type, token_date""")
 
 
 # ---------------------------------------------------------------- 보고용 표
@@ -208,8 +269,12 @@ def write_tables(con) -> None:
         write_csv(OUT / f"{name}.csv", cols, r.fetchall())
 
     life = """life as (select product_code, max(list_month) last_month from product_state_month group by 1)"""
-    dump("state_by_year", """select substr(list_month, 1, 4) as year, state, count(*) n_rows, count(distinct product_code) n_products
-        from product_state_month group by all order by 1, 2""")
+    for col in ("state_asof", "state_eom"):
+        dump(f"{col}_by_year", f"""select substr(list_month, 1, 4) as year, {col} state, count(*) n_rows, count(distinct product_code) n_products
+            from product_state_month group by all order by 1, 2""")
+    dump("state_asof_vs_eom", """select state_asof, state_eom, exposure_revised, state_revised, late_note_revised,
+               count(*) n_rows, count(distinct product_code) n_products, min(product_code || ' ' || list_month) example
+        from product_state_month where state_asof <> state_eom group by all order by 6 desc""")
     dump("link_rate", f"""with {life},
         py as (select distinct substr(list_month, 1, 4) as year, product_code from product_state_month)
         select year, case when l.last_month < '2025-12' then 'deleted' else 'alive_2025_12' end deleted, count(*) n_products,
@@ -221,25 +286,53 @@ def write_tables(con) -> None:
                round(100.0 * count(*) filter (where k.ob_link_path is not null) / count(*), 1) ob_any_pct
         from py join life l using (product_code) left join s2_product_link k using (product_code)
         group by rollup (year, 2) order by 1 nulls last, 2 nulls last""")
-    # 역할: 그 해 마지막 관측월의 값
-    dump("role_by_year", f"""with {life},
-        ly as (select product_code, substr(list_month, 1, 4) as year, arg_max(product_role, list_month) role,
-                      arg_max(role_source, list_month) role_source from product_state_month group by 1, 2)
-        select *, round(100.0 * n_products / sum(n_products) over (partition by year, deleted), 1) pct_in_year_deleted
-        from (select year, case when l.last_month < '2025-12' then 'deleted' else 'alive_2025_12' end deleted,
-                     coalesce(role, 'NULL') product_role, coalesce(role_source, '-') role_source, count(*) n_products
-              from ly join life l using (product_code) group by all) order by 1, 2, 3, 4""")
+    # 역할: 그 해 마지막 관측월의 값. product_role(그 달 관측) / product_role_carried(이어 씀)
+    for name, rc, sc in (("role_by_year", "product_role",
+                          "case when in_substitute_list then 'substitute' when product_role is not null then 'orangebook' end"),
+                         ("role_carried_by_year", "product_role_carried", "role_source")):
+        dump(name, f"""with {life},
+            ly as (select product_code, substr(list_month, 1, 4) as year, arg_max({rc}, list_month) role,
+                          arg_max({sc}, list_month) src from product_state_month group by 1, 2)
+            select *, round(100.0 * n_products / sum(n_products) over (partition by year, deleted), 1) pct_in_year_deleted
+            from (select year, case when l.last_month < '2025-12' then 'deleted' else 'alive_2025_12' end deleted,
+                         coalesce(role, 'NULL') role, coalesce(src, '-') source, count(*) n_products
+                  from ly join life l using (product_code) group by all) order by 1, 2, 3, 4""")
     dump("role_conflict_cases", """select product_code, min(list_month) first_month, max(list_month) last_month, count(*) n_months,
                any_value(sub_ref_drug) sub_ref_drug, any_value(ob_ref) ob_ref, any_value(product_role) product_role,
                any_value(ob_link_path) ob_link_path, any_value(product_name) product_name
         from product_state_month where role_conflict group by 1 order by 1""")
     dump("role_changes", """with r as (select product_code, list_month, product_role, is_bioequiv, sub_equiv,
-                      lag(product_role) over w prev_role, lag(is_bioequiv) over w prev_bioeq, lag(sub_equiv) over w prev_equiv
+                      lag(product_role) over w prev_role, lag(is_bioequiv) over w prev_bioeq, lag(sub_equiv) over w prev_equiv,
+                      row_number() over w rn
                    from product_state_month window w as (partition by product_code order by list_month))
         select product_code, list_month, prev_role, product_role, prev_bioeq, is_bioequiv, prev_equiv, sub_equiv from r
-        where (prev_role is distinct from product_role or prev_bioeq is distinct from is_bioequiv or prev_equiv is distinct from sub_equiv)
-          and list_month > (select min(list_month) from product_state_month p where p.product_code = r.product_code)
+        where rn > 1 and (prev_role is distinct from product_role or prev_bioeq is distinct from is_bioequiv
+                          or prev_equiv is distinct from sub_equiv)
         order by 1, 2""")
+    dump("suspend_signal_check", """select * from s2_suspend_signal_check""")
+    dump("suspend_signal_unconfirmed_by_reason", """select token_type, substr(signal_month, 1, 4) as year, confirm_status,
+               coalesce(reason, '-') reason, count(*) n, count(*) filter (where stay_in_signal_month) stay_in_signal_month,
+               min(product_code || ' ' || signal_month || ' ' || raw) example
+        from s2_suspend_signal_check group by all order by 1, 2, 3, 4""")
+    # 늦게 보인 지난 날짜: 다음 스냅샷에서 처음 보인 토큰의 날짜가 직전 스냅샷의 달 안 (그 달 행이 있는 제품)
+    dump("late_past_dated_tokens", """with cal as (select list_month, lag(list_month) over (order by list_month) prev_month
+                           from (select distinct list_month from product_state_month)),
+             t as (select distinct product_code, list_month, token_type, token_date, token_date_end, 'date' as which, token_date d
+                   from note_token where token_date is not null and token_type <> 'unresolved'
+                   union all
+                   select distinct product_code, list_month, token_type, token_date, token_date_end, 'date_end', token_date_end
+                   from note_token where token_type = 'R3b'),
+             q as (select t.*, c.prev_month from t join cal c using (list_month) where c.prev_month is not null
+                     and exists (select 1 from product_state_month p where p.product_code = t.product_code and p.list_month = c.prev_month)
+                     and not exists (select 1 from note_token u where u.product_code = t.product_code and u.list_month = c.prev_month
+                                     and u.token_type = t.token_type and u.token_date is not distinct from t.token_date
+                                     and u.token_date_end is not distinct from t.token_date_end))
+        select token_type, which,
+               case when d between cast(prev_month || '-01' as date) and last_day(cast(prev_month || '-01' as date)) then 'in_prev_month'
+                    when d < cast(prev_month || '-01' as date) then 'before_prev_month' else 'after_prev_month' end when_,
+               token_type in ('R3', 'R3b', 'R6') and which = 'date' state_rule, count(*) n, count(distinct product_code) n_products,
+               min(product_code || ' ' || list_month || ' ' || cast(d as varchar)) example
+        from q group by all order by 1, 2, 3""")
 
 
 def write_audit(con) -> None:
@@ -266,6 +359,7 @@ def build_all(con) -> None:
     build_bridges(con)
     build_attr_scd2(con)
     build_product_state_month(con)
+    build_signal_checks(con)
 
 
 def main() -> None:

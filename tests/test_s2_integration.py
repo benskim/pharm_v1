@@ -43,16 +43,18 @@ def test_rows_equal_raw_minus_non_product(con):
 
 def test_value_domains(con):
     bad = con.execute("""select count(*) from product_state_month
-        where state not in ('reimbursed', 'scheduled_listing', 'suspended', 'unpriced')
+        where state_asof not in ('reimbursed', 'scheduled_listing', 'suspended', 'unpriced')
+           or state_eom not in ('reimbursed', 'scheduled_listing', 'suspended', 'unpriced')
            or exposure_frac < 0 or exposure_frac > 1
            or (product_role is not null and product_role not in ('reference', 'bioequiv'))
-           or (role_source is not null and role_source not in ('substitute', 'orangebook'))
-           or ((product_role is null) <> (role_source is null))""").fetchone()[0]
+           or (role_source is not null and role_source not in ('observed', 'carried', 'orangebook'))
+           or ((product_role_carried is null) <> (role_source is null))
+           or (not in_substitute_list and (sub_ref_drug is not null or sub_bioeq is not null or sub_equiv is not null or is_bioequiv is not null))""").fetchone()[0]
     assert bad == 0
 
 
 def test_listing_2025_11(con):
-    got = dict(con.execute("""select p.state, count(*) from product_state_month p join stg_benefit b using (src_file, src_row)
+    got = dict(con.execute("""select p.state_asof, count(*) from product_state_month p join stg_benefit b using (src_file, src_row)
                               where b.list_month = '2025-11' and b.note like '%25.11.23%등재%' group by 1""").fetchall())
     assert got == {"scheduled_listing": 17, "reimbursed": 10}
 
@@ -95,12 +97,12 @@ def test_f5_suspension_reference_reproduced_from_notes(con):
 
 
 def test_f5_suspension_state_differs_only_by_rules(con):
-    """state 기준 급여정지 구간과 reference 정의의 차이는 두 가지 규칙으로만 생긴다.
+    """state_eom 기준 급여정지 구간과 reference 정의의 차이는 두 가지 규칙으로만 생긴다.
     (1) 미래 날짜 정지 토큰이 다음 스냅샷에서 확인되지 않음 (SUSPEND_SCHEDULED 미실현 → 상태 변화 없음)
     (2) 급여목록 비고에는 없고 대체조제 목록 비고에만 정지 토큰이 남음 (한 목록에만 남은 토큰 = 복귀 아님)
     """
     ref = {r[0]: r[1:] for r in con.execute(F5_SQL.format(cond="note like '%급여정지%' and note not like '%해제%'")).fetchall()}
-    mine = {r[0]: r[1:] for r in con.execute(F5_SQL.format(cond="state = 'suspended'")).fetchall()}
+    mine = {r[0]: r[1:] for r in con.execute(F5_SQL.format(cond="state_eom = 'suspended'")).fetchall()}
     diff = sorted(p for p in set(ref) | set(mine) if ref.get(p) != mine.get(p))
     assert diff, "차이가 없으면 이 시험의 전제가 바뀐 것이다"
     for pc in diff:
@@ -113,10 +115,10 @@ def test_f5_suspension_state_differs_only_by_rules(con):
                 select 1 from note_token n where n.product_code = ? and n.token_type in ('R3', 'R3b')
                   and n.token_date = t.token_date and n.list_month = strftime(cast(t.list_month || '-01' as date) + interval 1 month, '%Y-%m')))
             from t""", [pc, pc]).fetchone()[0]
-        # (2) state가 suspended인데 급여목록 비고에 정지 토큰이 없는 달이 있고, 그 달 대체조제 목록에는 있다
+        # (2) state_eom이 suspended인데 급여목록 비고에 정지 토큰이 없는 달이 있고, 그 달 대체조제 목록에는 있다
         sub_only = con.execute("""
             select count(*) > 0 from product_state_month p
-            where p.product_code = ? and p.state = 'suspended' and p.list_month between '2024-01' and '2025-12'
+            where p.product_code = ? and p.state_eom = 'suspended' and p.list_month between '2024-01' and '2025-12'
               and not exists (select 1 from note_token t where t.source_list = 'benefit' and t.product_code = p.product_code
                               and t.list_month = p.list_month and t.token_type in ('R3', 'R3b'))
               and exists (select 1 from note_token t where t.source_list = 'substitute' and t.product_code = p.product_code
@@ -135,7 +137,7 @@ def test_f6_attribute_changes_equal_reference(con):
 
 @pytest.mark.parametrize("pc", ["644914120", "644914130", "644914140"])
 def test_one_month_gap_real_cases(con, pc):
-    r = con.execute("""select list_month, state, state_revised from product_state_month
+    r = con.execute("""select list_month, state_eom, state_revised from product_state_month
                        where product_code = ? and list_month between '2022-10' and '2022-12' order by 1""", [pc]).fetchall()
     assert r == [("2022-10", "suspended", False), ("2022-11", "suspended", False), ("2022-12", "suspended", False)]
     # 2022-11에는 두 목록 모두 정지 토큰이 없다 (시험 전제)
@@ -148,7 +150,7 @@ def test_role_matches_substitute_values(con):
     bad = con.execute("""select count(*) from product_state_month p join stg_substitute s using (product_code, list_month)
         where s.row_kind = 'product_candidate' and (
               p.product_role is distinct from case when s.ref_drug then 'reference' when s.bioeq then 'bioequiv' end
-           or p.is_bioequiv is distinct from s.bioeq or p.role_source <> 'substitute'
+           or p.is_bioequiv is distinct from s.bioeq or p.role_source <> 'observed' or p.product_role_carried is distinct from p.product_role
            or p.sub_equiv is distinct from s.equiv)""").fetchone()[0]
     assert bad == 0
     # 의약동등 = 6 → reference + is_bioequiv
@@ -162,3 +164,47 @@ def test_role_orangebook_only(con):
               product_role is distinct from case when ob_ref then 'reference' end
            or (ob_generic and not coalesce(ob_ref, false) and product_role is not null))""").fetchone()[0]
     assert bad == 0
+
+
+def test_late_release_656700050(con):
+    """2025-12 비고의 해제일 2025-11-12 (사용자 지시 2026-11-14): 11월 기준일 시점은 정지, 월말은 복귀, exposure 19/30"""
+    r = con.execute("""select state_asof, state_eom, exposure_frac, late_note_revised from product_state_month
+                       where product_code = '656700050' and list_month = '2025-11'""").fetchone()
+    assert r[:2] == ("suspended", "reimbursed") and r[2] == pytest.approx(19 / 30) and r[3]
+
+
+def test_suspend_signal_check_complete(con):
+    """미래 날짜 정지 토큰마다 확인 결과가 하나. 확인 = 확인 스냅샷에 같은 토큰 (note_token에서 직접 센다)"""
+    n_tok = con.execute("""select count(*) from (select distinct product_code, list_month, token_type, token_date, token_date_end
+                           from note_token where token_type in ('R3', 'R3b') and is_future)""").fetchone()[0]
+    rows = dict(con.execute("select confirm_status, count(*) from s2_suspend_signal_check group by 1").fetchall())
+    assert sum(rows.values()) == n_tok
+    bad = con.execute("""select count(*) from s2_suspend_signal_check where (confirm_status = 'confirmed') <> coalesce(token_in_check, false)
+                         or (confirm_status = 'not_confirmed' and reason is null)""").fetchone()[0]
+    assert bad == 0
+
+
+@pytest.fixture(scope="module")
+def truncated(con):
+    """2023-06 이후 스냅샷을 지운 L1으로 S2를 다시 만든다 (메모리)"""
+    from pbd.common import connect
+    from pbd.ledger import s2_state as S2
+    cut = "2023-06"
+    c = connect(None)
+    c.execute(f"attach '{DB_PATH.as_posix()}' as src (read_only)")
+    for t in ("stg_benefit", "stg_substitute", "note_token"):
+        c.execute(f"create table {t} as select * from src.{t} where list_month <= '{cut}'")
+    for t in ("attr_2026_product", "attr_2026_item"):
+        c.execute(f"create table {t} as select * from src.{t}")
+    S2.build_all(c)
+    yield c, cut
+    c.close()
+
+
+def test_state_asof_ignores_later_snapshots_real(con, truncated):
+    c, cut = truncated
+    q = "select product_code, list_month, state_asof, stay_flag, in_substitute_list, product_role, product_role_carried from product_state_month where list_month <= ? order by 1, 2"
+    a = c.execute(q, [cut]).fetchall()
+    b = con.execute(q, [cut]).fetchall()
+    assert len(a) == len(b) and a == b
+

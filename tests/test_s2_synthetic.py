@@ -60,7 +60,8 @@ B_ROWS = (
     + every("600000140", {m: "급여정지(23.5.1.)" for m in M[:2]})                                        # 대체조제에만 남음
     + every("600000150", {m: "급여정지(23.5.1.)" for m in M[:5]})                                        # 분석 끝 1개월 공백
     + every("600000160", {"2024-01": "급여정지(23.5.1.)", "2024-02": "급여정지(23.5.1.)",
-                          "2024-03": "급여정지 해제(24.2.12)"}, M[:4])                                    # R6 해제
+                          "2024-03": "급여정지 해제(24.2.12)"}, M[:4])                                    # R6 해제 (늦게 보임)
+    + every("600000190", {"2024-03": "급여정지(24.2.20.)", "2024-04": "급여정지(24.2.20.)"}, M[:4])      # 늦게 보인 정지일
     # 창 시작 전 집행정지, U6 (해제 예정 → 다음 달 해제 확인)
     + every("600000170", {m: "집행정지(21.8.31.)" for m in M[:2]}, M[:2])
     + [bene("2024-01", "600000180", "집행정지(21.9.1.)->집행정지해제(24.1.18., 176원)"),
@@ -68,6 +69,7 @@ B_ROWS = (
     # product_role
     + every("600000200", months=M[:2]) + every("600000210", months=M[:1]) + every("600000220", months=M[:1])
     + every("600000230", months=M[:1]) + every("600000240", months=M[:1]) + every("600000250", months=M[:2])
+    + every("600000260", months=M[:3]) + every("600000270", months=M[:2])
     # non_product 행 (S1 row_kind)
     + [bene("2024-01", "243001ACS", None, None, firm=None, name="tretinoin 10mg")]
 )
@@ -78,6 +80,8 @@ S_ROWS = (
     + [subs("2024-01", "600000240", item=198500240.0)]                                           # 생동인정만
     + [subs("2024-01", "600000250", ref="○", bioeq=None, equiv="4", item=198500250.0),
        subs("2024-02", "600000250", ref="○", bioeq="○(3)", equiv="6", item=198500250.0)]         # 4 → 6
+    + [subs("2024-01", "600000260", item=198500260.0)]                                           # 1월만 대체조제 (2·3월 이어 씀)
+    + [subs("2024-02", "600000270", item=198500270.0)]                                           # 2월부터 (1월로 당겨 쓰지 않음)
     + [subs("2024-01", "600000999")]                                                             # 대체조제에만 있음
 )
 ATTR_PRODUCT = [("600000210", "198500210"), ("600000230", "198500230")]
@@ -107,7 +111,8 @@ def con(tmp_path_factory):
     c.close()
 
 
-COLS = "state, exposure_frac, exposure_revised, state_revised, resume_unconfirmed"
+COLS = "state_asof, state_eom, exposure_frac, exposure_revised, state_revised, resume_unconfirmed"
+R, SL, SU, UP = "reimbursed", "scheduled_listing", "suspended", "unpriced"
 
 
 def rows(con, pc, cols=COLS):
@@ -123,87 +128,95 @@ def test_row_count_excludes_non_product(con):
 
 def test_scheduled_listing_first_observed(con):
     r = rows(con, "600000020")
-    assert r["2024-03"] == ("scheduled_listing", pytest.approx(12 / 31), True, False, False)   # 3/20~3/31 급여
-    assert r["2024-04"] == ("reimbursed", 1.0, False, False, False)
+    assert r["2024-03"] == (SL, R, pytest.approx(12 / 31), True, False, False)   # 기준일엔 시행 전, 월말엔 등재 (3/20~3/31)
+    assert r["2024-04"] == (R, R, 1.0, False, False, False)
 
 
 def test_scheduled_listing_existing_product_stays_reimbursed(con):
-    assert rows(con, "600000030")["2024-03"] == ("reimbursed", 1.0, False, False, False)
+    assert rows(con, "600000030")["2024-03"] == (R, R, 1.0, False, False, False)
 
 
 def test_scheduled_listing_at_analysis_end(con):
-    assert rows(con, "600000040")["2024-06"] == ("scheduled_listing", 0.0, False, False, False)
+    assert rows(con, "600000040")["2024-06"] == (SL, SL, 0.0, False, False, False)      # 확인할 스냅샷 없음
 
 
 def test_mid_month_suspension_confirmed(con):
     r = rows(con, "600000050")
-    assert r["2024-01"] == ("reimbursed", 1.0, False, False, False)
-    assert r["2024-02"] == ("suspended", pytest.approx(14 / 29), True, False, False)
-    assert r["2024-03"] == ("suspended", 0.0, False, False, False)
+    assert r["2024-01"] == (R, R, 1.0, False, False, False)
+    assert r["2024-02"] == (R, SU, pytest.approx(14 / 29), True, False, False)          # 기준일 2/1에는 정지 전
+    assert r["2024-03"] == (SU, SU, 0.0, False, False, False)
 
 
 def test_mid_month_suspension_not_confirmed(con):
     r = rows(con, "600000060")
-    assert r["2024-02"] == ("reimbursed", 1.0, False, False, False)
-    assert r["2024-03"] == ("reimbursed", 1.0, False, False, False)
+    assert r["2024-02"] == (R, R, 1.0, False, False, False)
+    assert r["2024-03"] == (R, R, 1.0, False, False, False)
 
 
 def test_suspended_then_delisted(con):
-    r = rows(con, "600000070", "state, absent_next_month")
-    assert r == {"2024-01": ("suspended", False), "2024-02": ("suspended", False), "2024-03": ("suspended", True)}
+    r = rows(con, "600000070", "state_asof, state_eom, absent_next_month")
+    assert r == {"2024-01": (SU, SU, False), "2024-02": (SU, SU, False), "2024-03": (SU, SU, True)}
 
 
 def test_stay_with_price_change(con):
-    r = rows(con, "600000080", "state, stay_flag, price_listed, exposure_frac")
-    assert r == {"2024-01": ("reimbursed", True, 100.0, 1.0), "2024-02": ("reimbursed", True, 90.0, 1.0),
-                 "2024-03": ("reimbursed", True, 90.0, 1.0)}
+    r = rows(con, "600000080", "state_eom, stay_flag, price_listed, exposure_frac")
+    assert r == {"2024-01": (R, True, 100.0, 1.0), "2024-02": (R, True, 90.0, 1.0), "2024-03": (R, True, 90.0, 1.0)}
 
 
 def test_unpriced_two_places(con):
-    assert rows(con, "600000090", "state, unpriced_evidence")["2024-01"] == ("unpriced", "note+price_null")
-    assert rows(con, "600000100", "state, unpriced_evidence")["2024-01"] == ("unpriced", "price_null")
+    assert rows(con, "600000090", "state_asof, state_eom, unpriced_evidence")["2024-01"] == (UP, UP, "note+price_null")
+    assert rows(con, "600000100", "state_asof, state_eom, unpriced_evidence")["2024-01"] == (UP, UP, "price_null")
 
 
 def test_dated_suspension_resumes_even_if_note_remains(con):
     r = rows(con, "600000110")
-    assert r["2024-01"] == ("suspended", pytest.approx(9 / 31), True, False, False)   # 1/1~1/9 급여 (시작일 미래 → 2월에 확인)
-    assert r["2024-02"] == ("reimbursed", pytest.approx(9 / 29), True, False, False)  # 2/21~2/29 급여 (종료일 미래 → 3월에 확인)
-    assert r["2024-03"] == ("reimbursed", 1.0, False, False, False)                   # 비고가 남아 있어도 복귀
-    assert r["2024-04"] == ("reimbursed", 1.0, False, False, False)
+    assert r["2024-01"] == (R, SU, pytest.approx(9 / 31), True, False, False)    # 시작일 1/10: 기준일엔 전, 월말엔 정지 (2월에 확인)
+    assert r["2024-02"] == (SU, R, pytest.approx(9 / 29), True, False, False)    # 종료일 2/20: 기준일엔 정지, 월말엔 복귀 (3월에 확인)
+    assert r["2024-03"] == (R, R, 1.0, False, False, False)                      # 비고가 남아 있어도 복귀
+    assert r["2024-04"] == (R, R, 1.0, False, False, False)
 
 
 def test_resume_one_month_gap_no_event(con):
     r = rows(con, "600000120")
-    assert r["2024-03"] == ("suspended", 0.0, False, False, False)
-    assert r["2024-06"] == ("suspended", 0.0, False, False, True)    # 분석 끝 1개월 공백도 함께 확인
+    assert r["2024-03"] == (SU, SU, 0.0, False, False, False)
+    assert r["2024-06"] == (SU, SU, 0.0, False, False, True)                     # 분석 끝 1개월 공백
 
 
 def test_resume_two_month_gap_rewrites_first_month(con):
     r = rows(con, "600000130")
-    assert r["2024-02"] == ("suspended", 0.0, False, False, False)
-    assert r["2024-03"] == ("reimbursed", 1.0, False, True, False)   # 첫 공백 달 1일 복귀, 고쳐 쓴 행
-    assert r["2024-04"] == ("reimbursed", 1.0, False, False, False)
+    assert r["2024-02"] == (SU, SU, 0.0, False, False, False)
+    assert r["2024-03"] == (SU, R, 1.0, False, True, False)    # 기준일엔 공백 1개월만 보임, 월말은 4월에 확인되어 고쳐 씀
+    assert r["2024-04"] == (R, R, 1.0, False, False, False)
 
 
 def test_token_left_in_one_list_is_not_resume(con):
     r = rows(con, "600000140")
-    assert [r[m][0] for m in M] == ["suspended"] * 4 + ["reimbursed"] * 2
-    assert r["2024-05"][3] is True                                   # 두 목록 모두 2개월 공백 → 5월 1일 복귀
+    assert [r[m][1] for m in M] == [SU] * 4 + [R] * 2
+    assert [r[m][0] for m in M] == [SU] * 5 + [R]
+    assert r["2024-05"][4] is True
 
 
 def test_resume_unconfirmed_at_analysis_end(con):
-    assert rows(con, "600000150")["2024-06"] == ("suspended", 0.0, False, False, True)
+    assert rows(con, "600000150")["2024-06"] == (SU, SU, 0.0, False, False, True)
 
 
-def test_r6_release(con):
-    r = rows(con, "600000160")
-    assert r["2024-02"] == ("suspended", 0.0, False, False, False)   # 지난 달은 고쳐 쓰지 않는다 (해제일 2/12)
-    assert r["2024-03"] == ("reimbursed", 1.0, False, False, False)
+def test_late_release_note(con):
+    """3월 스냅샷에 처음 보인 해제일 2/12: 2월 월말은 복귀 (2/1~2/11 정지), 2월 기준일 시점은 정지"""
+    r = rows(con, "600000160", COLS + ", late_note_revised")
+    assert r["2024-02"] == (SU, R, pytest.approx(18 / 29), False, False, False, True)
+    assert r["2024-03"] == (R, R, 1.0, False, False, False, False)
+
+
+def test_late_suspension_note(con):
+    """3월 스냅샷에 처음 보인 정지일 2/20: 2월 월말은 정지 (2/1~2/19 급여), 2월 기준일 시점은 급여"""
+    r = rows(con, "600000190", COLS + ", late_note_revised")
+    assert r["2024-02"] == (R, SU, pytest.approx(19 / 29), False, False, False, True)
+    assert r["2024-03"] == (SU, SU, 0.0, False, False, False, False)
 
 
 def test_stay_before_window_flag_only(con):
-    r = rows(con, "600000170", "state, stay_flag, stay_date")
-    assert r["2024-01"] == ("reimbursed", True, D(2021, 8, 31))
+    r = rows(con, "600000170", "state_eom, stay_flag, stay_date")
+    assert r["2024-01"] == (R, True, D(2021, 8, 31))
 
 
 def test_u6_stay_release(con):
@@ -211,32 +224,71 @@ def test_u6_stay_release(con):
     assert r == {"2024-01": (True,), "2024-02": (False,)}            # 해제일 미래 → 유지, 다음 달 해제 확인
 
 
-ROLE = "product_role, role_source, is_bioequiv, role_conflict, sub_equiv, ob_ref, ob_generic, ob_link_path"
+ROLE = "product_role, product_role_carried, role_source, is_bioequiv, role_conflict, sub_equiv, ob_ref, ob_generic, ob_link_path"
 
 
 def test_role_reference_and_bioequiv(con):
-    assert rows(con, "600000200", ROLE)["2024-01"] == ("reference", "substitute", True, None, "6", None, None, None)
+    assert rows(con, "600000200", ROLE)["2024-01"] == ("reference", "reference", "observed", True, None, "6", None, None, None)
 
 
 def test_role_orangebook_generic_mark_only_is_null(con):
-    assert rows(con, "600000210", ROLE)["2024-01"] == (None, None, None, None, None, False, True, "code_map")
+    assert rows(con, "600000210", ROLE)["2024-01"] == (None, None, None, None, None, None, False, True, "code_map")
 
 
 def test_role_conflict_adopts_substitute(con):
-    assert rows(con, "600000220", ROLE)["2024-01"] == ("reference", "substitute", False, True, "4", False, False, "substitute")
+    assert rows(con, "600000220", ROLE)["2024-01"] == ("reference", "reference", "observed", False, True, "4", False, False, "substitute")
 
 
 def test_role_orangebook_reference_outside_substitute(con):
-    assert rows(con, "600000230", ROLE)["2024-01"] == ("reference", "orangebook", None, None, None, True, False, "code_map")
+    assert rows(con, "600000230", ROLE)["2024-01"] == ("reference", "reference", "orangebook", None, None, None, True, False, "code_map")
 
 
 def test_role_bioequiv(con):
-    assert rows(con, "600000240", ROLE)["2024-01"][:3] == ("bioequiv", "substitute", True)
+    assert rows(con, "600000240", ROLE)["2024-01"][:4] == ("bioequiv", "bioequiv", "observed", True)
 
 
 def test_role_monthly(con):
     r = rows(con, "600000250", "product_role, is_bioequiv, sub_equiv")
     assert r == {"2024-01": ("reference", False, "4"), "2024-02": ("reference", True, "6")}
+
+
+def test_role_carried_forward_only(con):
+    """빠진 달: 관측값은 NULL, product_role_carried는 과거 값만 앞으로 이어 쓴다"""
+    cols = "in_substitute_list, sub_bioeq, is_bioequiv, product_role, product_role_carried, role_source"
+    assert rows(con, "600000260", cols) == {
+        "2024-01": (True, True, True, "bioequiv", "bioequiv", "observed"),
+        "2024-02": (False, None, None, None, "bioequiv", "carried"),
+        "2024-03": (False, None, None, None, "bioequiv", "carried")}
+    assert rows(con, "600000270", cols) == {
+        "2024-01": (False, None, None, None, None, None),                       # 뒤의 값을 당겨 쓰지 않음
+        "2024-02": (True, True, True, "bioequiv", "bioequiv", "observed")}
+
+
+def _build(tmp, b_rows, s_rows):
+    c = connect(None)
+    pb, ps = tmp / "b.parquet", tmp / "s.parquet"
+    pd.DataFrame(b_rows).to_parquet(pb, index=False)
+    pd.DataFrame(s_rows).to_parquet(ps, index=False)
+    L.build_stg_snapshot(c, "benefit", [pb])
+    L.build_stg_snapshot(c, "substitute", [ps])
+    L.build_note_token(c)
+    c.execute("create table attr_2026_product (product_code varchar, item_code varchar)")
+    c.executemany("insert into attr_2026_product values (?, ?)", ATTR_PRODUCT)
+    c.execute("create table attr_2026_item (item_code varchar, in_orangebook boolean, ob_ref boolean, ob_generic boolean)")
+    c.executemany("insert into attr_2026_item values (?, ?, ?, ?)", ATTR_ITEM)
+    S2.build_all(c)
+    return c
+
+
+@pytest.mark.parametrize("cut", M[:-1])
+def test_state_asof_ignores_later_snapshots(con, tmp_path, cut):
+    """cut 이후 스냅샷을 지우고 다시 만들어도 cut까지의 state_asof가 같다"""
+    c = _build(tmp_path, [r for r in B_ROWS if r["기준일자"][:7] <= cut], [r for r in S_ROWS if r["기준일자"][:7] <= cut])
+    try:
+        q = "select product_code, list_month, state_asof from product_state_month where list_month <= ? order by 1, 2"
+        assert c.execute(q, [cut]).fetchall() == con.execute(q, [cut]).fetchall()
+    finally:
+        c.close()
 
 
 def test_substitute_only_row_has_no_state_row(con):

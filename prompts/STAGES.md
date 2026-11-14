@@ -60,7 +60,7 @@ P1 S3만 수행해. signal_ledger, signal_outcome, event_ledger, 스냅샷 차�
 P1 S4만 수행해. docs/PLAN_P1.md §5 A1~A6.
 - A4는 대상 선정 기준과 제외 건수(비공개로 빠진 성분 포함)를 결과보다 먼저 보고한다.
 - 실현율은 censored를 뺀 분모, Wilson 95% 구간.
-- outputs/validation/sample_60.csv를 시드 고정으로 만든다. 라벨 컬럼은 비운다. 라벨은 내가 채운다.
+- outputs/validation/sample_60.csv를 시드 고정으로 만든다. 라벨 컬럼은 비운다. 라벨은 내가 채운다. 654700150(2024-01)은 반드시 넣는다.
 - 라벨이 채워진 뒤 정밀도를 계산하는 스크립트를 따로 둔다.
 ```
 

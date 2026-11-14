@@ -206,3 +206,115 @@ code_map `일반명코드(성분명코드)`와 급여목록 주성분코드를 �
 ## 원본 교체 (2026-11-14, 5차)
 - 2025-11·12 급여목록 원본 CSV로 대조한 결과, 8자리 제품코드 2,357행은 원본에서 9자리였고 0 채움 값과 모두 같았다. `benefit_snapshot_table_2425.parquet`의 이 2,357칸만 원본 값으로 바꿨다. 다른 칸·행 순서·스키마는 같다. 교체 전 파일은 `data/raw/benefit/_superseded/`(회귀 표본용).
 - 교체 후 다시 실행: `snapshot_inventory.n_code_padded` 합계 2,357 → 0, `product_code_raw`만 바뀜. `product_code`와 S2 표 4개(`product_state_month` 등)의 해시는 교체 전과 같다. `make test` 102개 통과, `make check-sample` 차이 없음.
+
+---
+
+## 10. 7차 지시 반영 (2026-11-14)
+
+이 절의 숫자는 7차 반영 뒤 `make p1-s1`·`make p1-s2`를 다시 돌려 계산했다. 위 §3의 `state`는 이제 두 컬럼으로 나뉘었다 (§10.2). 위 §3의 숫자는 옛 `state`(등재 예정은 기준일, 나머지는 월말)의 값이다.
+
+### 10.1 완료 기준 변경 (지시 10)
+F5 급여정지 기준을 "reference 정의로 세면 일치하고, 차이는 (a) 확인되지 않은 미래 정지 비고, (b) 대체조제 목록에만 남은 정지 비고 두 규칙으로 모두 설명된다"로 바꿨다 (PLAN_P1 §6, DECISIONS 7차). 시험 `test_f5_suspension_reference_reproduced_from_notes`, `test_f5_suspension_state_differs_only_by_rules`(`state_eom` 기준) 통과. 차이 28개 제품 = (a) 27 + (b) 1로 §2와 같다.
+
+### 10.2 `state_asof`·`state_eom` (지시 11)
+- `state_asof`: 기준일 시점, 그 스냅샷까지의 정보만. `state_eom`: 월말, 이후 스냅샷으로 확인된 것만. `exposure_frac`은 `state_eom` 기준. `state` 컬럼은 없앴다.
+- 2025-11 `'25.11.23 등재` 27행: `state_asof` = scheduled_listing 17 / reimbursed 10 (통과). 같은 행의 `state_eom`은 27행 모두 reimbursed다 (17행은 등재일부터의 비율 8/30).
+
+**시험: 뒤의 스냅샷을 지워도 `state_asof`가 같다**
+| 시험 | 방법 | 결과 |
+|---|---|---|
+| `test_state_asof_ignores_later_snapshots` (합성) | 2024-01~05 각 달 뒤를 지우고 S1 적재부터 다시 만듦 (5개 시점) | 통과 |
+| `test_state_asof_ignores_later_snapshots_real` (실데이터) | 2023-06 뒤의 stg·note_token을 지우고 S2를 메모리에서 다시 만듦. `state_asof`·`stay_flag`·`in_substitute_list`·`product_role`·`product_role_carried` 비교 | 통과 (2022-01~2023-06의 모든 행이 같음) |
+
+**전체**
+| state | `state_asof` 행 (제품) | `state_eom` 행 (제품) |
+|---|---|---|
+| reimbursed | 1,105,466 (28,678) | 1,105,741 (28,677) |
+| scheduled_listing | 342 (342) | 0 |
+| suspended | 6,368 (446) | 6,435 (446) |
+| unpriced | 2,631 (65) | 2,631 (65) |
+
+`state_eom`의 scheduled_listing이 0인 것은 등재 예정 342행이 모두 다음 스냅샷에서 확인됐고, 등재일이 모두 그 달 안이기 때문이다.
+
+**`state_asof` ≠ `state_eom` (541행)**
+| `state_asof` | `state_eom` | 원인 | 행 | 예 |
+|---|---|---|---|---|
+| scheduled_listing | reimbursed | 등재 예정 확인 (`exposure_revised`) | 342 | 058801240 2024-06 |
+| reimbursed | suspended | 늦게 보인 정지일 (`late_note_revised`, R3) | 105 | 059000130 2022-02 |
+| suspended | reimbursed | 종료일 없는 정지의 2개월 연속 공백, 첫 공백 달 (`state_revised`) | 65 | 058800860 2022-11 |
+| reimbursed | suspended | 월중 미래 정지 확인 (`exposure_revised`) | 28 | 059000090 2022-03 |
+| suspended | reimbursed | 늦게 보인 해제일 (`late_note_revised`, R6) | 1 | 656700050 2025-11 |
+
+고쳐 쓰기 표시: `exposure_revised` 370, `state_revised` 65, `late_note_revised` 106. 0 < `exposure_frac` < 1: 476행 (§3의 370에서 늘었다. 늦게 보인 지난 날짜 106행).
+
+### 10.3 2022-05의 미래 정지 72건 (지시 12)
+`state_asof`·`state_eom` 모두 reimbursed다. 근거를 `s2_suspend_signal_check`에 남겼다: `confirm_status = not_confirmed`, `reason = stay`, 확인 스냅샷 2022-08 (정지 토큰 없음, 집행정지 토큰 있음). 72건 중 70건은 신호 달(2022-05)에도 집행정지 토큰이 있었다.
+
+### 10.4 늦게 보인 지난 날짜 (지시 13)
+656700050: 2025-11 `state_asof = suspended`, `state_eom = reimbursed`, `exposure_frac = 19/30` (시험 `test_late_release_656700050`).
+
+**같은 경우의 건수** (다음 스냅샷에서 처음 보인 토큰. 직전 스냅샷에 같은 토큰이 없고, 직전 달 행이 있는 제품. `outputs/s2/late_past_dated_tokens.csv`)
+| 유형 | 날짜가 직전 스냅샷의 달 안 | 날짜가 그보다 이름 | 상태에 반영 |
+|---|---|---|---|
+| R6 급여정지 해제 | 1 | 0 | 반영 (1행) |
+| R3 급여정지 | 105 | 3 | 달 안의 105만 반영 (`state_eom`). "그보다 이름" 3은 644914120·644914130·644914140의 1개월 공백 뒤 재등장이다 |
+| R3b 시작일·종료일 | 0 | 0 | |
+| R4 집행정지 | 177 | 14 | 반영 안 함 (`stay_flag`는 기준일 시점 값) |
+| R5 집행정지 해제 | 7 | 0 | 반영 안 함 (2025-12의 `25.11.20. 고시` 7건) |
+
+- R3 105행: 2022 88, 2023 17. 예: 059000130은 2022-03 스냅샷에 `급여정지(22.2.24.)`가 처음 나와 2022-02 `state_eom = suspended`, `exposure_frac = 23/28`.
+- 지시는 656700050이었고, 같은 유형인 R3·R3b에도 같은 규칙을 적용했다 (확인 필요 1).
+
+### 10.5 대체조제 목록에서 빠진 달 (지시 14)
+- 관측값 컬럼(`sub_ref_drug`, `sub_bioeq`, `sub_bioeq_raw`, `sub_equiv`, `is_bioequiv`)은 목록에 없는 달에 NULL (시험).
+- `product_role_carried`: 그 달 대체조제 값 → 과거 달의 대체조제 값 → 오렌지북 공고대조약. `role_source` = observed / carried / orangebook. 뒤의 값을 앞 달로 가져오지 않는다 (합성 시험 `test_role_carried_forward_only`).
+
+| `role_source` | `product_role_carried` | 행 | 제품 |
+|---|---|---|---|
+| observed | reference | 47,883 | 1,155 |
+| observed | bioequiv | 511,369 | 13,063 |
+| carried | reference | 353 | 12 |
+| carried | bioequiv | 1,685 | 79 |
+| orangebook | reference | 1,157 | 32 |
+| NULL | NULL | 552,360 | 15,348 |
+
+이어 쓴 행은 2,038행(91개 제품)이다. 한 번이라도 대체조제 목록에 실린 제품의 목록 밖 행 13,575 중 11,537행은 처음 목록에 실리기 전의 달이라 이어 쓸 과거 값이 없고, 나머지 2,038행이 모두 이어 쓴 행이다. 연도별 표 `outputs/s2/role_carried_by_year.csv`.
+
+### 10.6 확인되지 않은 미래 정지 164건 (지시 15)
+미래 날짜 정지 토큰 214개 (제품·달·유형·날짜) = 확인 50 + 확인 안 됨 164. 확인 스냅샷 = 신호 날짜 이후 첫 스냅샷. `s2_suspend_signal_check`, `outputs/s2/suspend_signal_unconfirmed_by_reason.csv`.
+
+| 사유 | 유형 | 건수 | 예 |
+|---|---|---|---|
+| 집행정지 비고로 바뀜 (`stay`: 확인 스냅샷에 정지 토큰 없음, 집행정지 토큰 있음) | R3b | 72 | 642500151, 642500160, 642500170, 642500271, 642500390 (2022-05 `급여정지(22.8.1.~22.8.31)`) |
+| | R3 | 5 | 642302580 2022-03 `급여정지(22.3.18.)`, 641700180·642500271·642500440·642900050 2022-09 `급여정지(22.9.8.)` |
+| 정지 기간이 다음 스냅샷 전에 끝나 확인할 수 없음 (`unconfirmable`) | | **0** | 종료일이 있는 R3b만 판정할 수 있다. R3에는 종료일이 없어 이 사유를 판정할 수 없다 |
+| 그 밖: 확인 스냅샷에 제품이 없음 (`product_absent`) | R3 | 29 | 629700160 2022-01 `급여정지(22.1.5.)`, 644502610 2022-01, 623005720 2023-08, 642403630·642800650 2023-12 |
+| 그 밖: 제품은 있고 토큰만 사라짐 (`token_gone`) | R3 | 58 | 621800720·625200340·643102080·643502370·643505661 2022-09 `급여정지(22.9.8.)`; 2025-06 `급여정지(25.6.24.)` 23건 |
+
+- 합: 집행정지 77 + 확인할 수 없음 0 + 그 밖 87 (제품 없음 29, 토큰 사라짐 58) = 164.
+- `unconfirmable`은 `not_confirmed`와 다른 `confirm_status`로 둔다. 실현율 분모에 넣을지는 사용자가 정한다.
+
+### 10.7 그 밖의 반영
+- **NOTE_RULES §2 R3 (지시 16)**: 지금 문서에는 "표본에 없음"이 아니라 "표본 구간 27건"이 적혀 있었다. 27건의 달별 건수와 예시, 27건 모두 확인되지 않았다는 점, 전체 기간 확인 28건을 적었다.
+- **654700150 (지시 17)**: 지금 규칙대로 둔다. PLAN_P1 §5 A6, STAGES S4, DECISIONS에 "S4 60건 표본에 반드시 포함"을 적었다.
+
+### 10.8 연번 사용처 (지시 5)
+| 위치 | 쓰임 | 조치 |
+|---|---|---|
+| `scripts/fix_benefit_2511_2512_codes.py` | CSV ↔ parquet 대응을 (달, 연번)으로 함 | (달, 제품코드)로 바꿈. 다시 실행한 교체 파일의 sha256이 같다 (`bcf7e8c4…`) |
+| `scripts/check_benefit_originals.py` | 원본 제품 행 ↔ parquet을 (달, 연번, 제품코드)로 대응 | (달, 제품코드)로 바꿈. 원본 제품 행의 (달, 제품코드)는 4개월 모두 고유. 대조 결과 같음 |
+| `src/pbd/ledger/s1_load.py` | `row_no`를 컬럼으로 적재. `snapshot_inventory.n_rowno_dup` 계산 | 키·조인 아님. 그대로 |
+| `tests/test_s1_load.py:118` | 합성 데이터의 정렬(`order by row_no`, 연번 고유) | 키·조인 아님. 그대로 |
+| `src/pbd/ledger/s2_state.py`, S1·S2 시험 | 행 대응은 (`src_file`, `src_row`) 또는 (`product_code`, `list_month`) | 연번 안 씀 |
+| `reference/precheck_v3.py` | 쓰지 않음 | |
+
+연번 중복 (stg 기준): 급여목록 2022-10 3, 2023-11 3, 2024-12 4, 대체조제 2023-11 1.
+
+### 10.9 시험
+- `make test`: **113개 통과** (S0 13 + S1 48 + S2 52). S2는 state_rules 6, 합성 31, 통합 15.
+- `make check-sample`: precheck 차이 없음 + 표본 구간 시험 3개 통과.
+
+## 확인 필요 (7차 뒤)
+1. **늦게 보인 R3 정지일 105행**: 656700050(R6)에 대한 지시를 같은 유형인 R3에도 적용해, 다음 스냅샷에서 처음 보인 정지일이 직전 달 안이면 그 달 `state_eom`을 정지로 고쳐 썼습니다 (§10.4). R6만 적용할까요, 이대로 둘까요?
+2. **`unconfirmable`의 분모**: 지금 0건입니다. R3에는 종료일이 없어 이 사유를 판정할 수 없습니다. S3에서 `unconfirmable`을 실현율 분모에 넣을지 정해 주세요.
+3. **집행정지·해제의 늦은 날짜** (R4 177, R5 7): `stay_flag`는 기준일 시점 값으로 두고 고쳐 쓰지 않았습니다. 이대로 둘까요?
