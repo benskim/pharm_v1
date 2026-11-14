@@ -17,7 +17,9 @@ RAW = Path("data/raw")
 OUT = Path("data/sample")
 
 COPIES = {
-    "benefit_snapshot_table_2425.parquet": RAW / "benefit/benefit_snapshot_table_2425.parquet",
+    # 회귀 표본은 설계 때의 데이터여야 한다. 2026-11-14 원본은 2025-11·12 제품코드를 복원한 파일로 바뀌었으므로
+    # 교체 전 파일을 쓴다 (reference F1의 8자리 2,357행이 이 파일에서 나온다. DECISIONS 2026-11-14 5차)
+    "benefit_snapshot_table_2425.parquet": RAW / "benefit/_superseded/benefit_snapshot_table_2425.parquet",
     "substitute_snapshot_table_2425.parquet": RAW / "substitute/substitute_snapshot_table_2425.parquet",
     "dim_drug_master_20260831.parquet": RAW / "master/dim_drug_code_map_26.parquet",
     "dim_drug_info.parquet": RAW / "master/dim_drug_info_26.parquet",

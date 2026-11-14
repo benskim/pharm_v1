@@ -10,7 +10,7 @@ null_tokens: ["", "nan", "None", "NaN"]
 
 benefit:
   row_no: [연번]
-  product_code: [제품코드]          # 2025-11·12에 8자리 → lpad 9
+  product_code: [제품코드]          # 설계 때 파일은 2025-11·12에 8자리. 2026-11-14 원본 CSV로 복원(교체 후 8자리 0행). lpad 규칙은 유지
   ingredient_code: [주성분코드]
   ingredient_name: [주성분명]
   product_name: [제품명]

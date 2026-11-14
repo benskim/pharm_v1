@@ -229,3 +229,9 @@
 - `snapshot_inventory.diff_direction` 추가. 파일명 건수가 다른 8개월 모두 적재 행이 더 크다. `docs/LIMITATIONS.md` L1.
 - 위 "확인 필요 (3차 뒤)" 1·2는 이 지시로 답이 났다. 자세한 내용은 `reports/P1_S2_result.md` §1·§7.
 - 재실행: `make p1-s1` → S1 시험 47개 통과 (diff_direction 시험 1개 추가).
+
+---
+
+## 원본 교체 (2026-11-14, 5차)
+- 2025-11·12 급여목록 원본 CSV로 대조한 결과, 8자리 제품코드 2,357행은 원본에서 9자리였고 0 채움 값과 모두 같았다. `benefit_snapshot_table_2425.parquet`의 이 2,357칸만 원본 값으로 바꿨다. 다른 칸·행 순서·스키마는 같다. 교체 전 파일은 `data/raw/benefit/_superseded/`(회귀 표본용).
+- 교체 후 다시 실행: `snapshot_inventory.n_code_padded` 합계 2,357 → 0, `product_code_raw`만 바뀜. `product_code`와 S2 표 4개(`product_state_month` 등)의 해시는 교체 전과 같다. `make test` 102개 통과, `make check-sample` 차이 없음.
