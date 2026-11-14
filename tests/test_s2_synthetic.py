@@ -62,6 +62,12 @@ B_ROWS = (
     + every("600000160", {"2024-01": "급여정지(23.5.1.)", "2024-02": "급여정지(23.5.1.)",
                           "2024-03": "급여정지 해제(24.2.12)"}, M[:4])                                    # R6 해제 (늦게 보임)
     + every("600000190", {"2024-03": "급여정지(24.2.20.)", "2024-04": "급여정지(24.2.20.)"}, M[:4])      # 늦게 보인 정지일
+    # 미래 정지 신호의 확인 분류 (s2_suspend_signal_check)
+    + every("600000300", {"2024-02": "급여정지(24.2.15.)", "2024-03": "급여정지(24.2.16.)"}, M[:4])      # 날짜가 하루 다름
+    + every("600000310", {"2024-02": "급여정지(24.2.15.)", "2024-03": "집행정지(24.2.15.)"}, M[:4])      # 집행정지로 바뀜
+    + every("600000320", {"2024-02": "급여정지(24.2.15.)"}, M[:2])                                     # 다음 달 제품 없음
+    + every("600000330", {"2024-02": "급여정지(24.02.10.~24.02.25)"}, M[:4])                           # 확인 전에 끝난 정지
+    + every("600000340", {"2024-06": "급여정지(24.6.15.)"}, M)                                         # 분석 끝
     # 창 시작 전 집행정지, U6 (해제 예정 → 다음 달 해제 확인)
     + every("600000170", {m: "집행정지(21.8.31.)" for m in M[:2]}, M[:2])
     + [bene("2024-01", "600000180", "집행정지(21.9.1.)->집행정지해제(24.1.18., 176원)"),
@@ -293,3 +299,21 @@ def test_state_asof_ignores_later_snapshots(con, tmp_path, cut):
 
 def test_substitute_only_row_has_no_state_row(con):
     assert con.execute("select count(*) from product_state_month where product_code = '600000999'").fetchone()[0] == 0
+
+
+def test_suspend_signal_check_classes(con):
+    got = {r[0]: r[1:] for r in con.execute("""select product_code, confirm_status, reason, date_gap_days
+        from s2_suspend_signal_check""").fetchall()}
+    assert got["600000050"] == ("confirmed", None, None)
+    assert got["600000300"] == ("confirmed_other_date", None, 1)
+    assert got["600000310"] == ("not_confirmed", "stay", None)
+    assert got["600000320"] == ("not_confirmed", "delisted", None)
+    assert got["600000060"] == ("not_confirmed", "note_gone", None)
+    assert got["600000330"] == ("unverifiable", None, None)
+    assert got["600000340"] == ("censored", None, None)
+
+
+def test_stay_flag_comment(con):
+    c = con.execute("""select comment from duckdb_columns() where table_name = 'product_state_month' and column_name = 'stay_flag'""").fetchone()[0]
+    assert c.startswith("기준일 시점 값")
+

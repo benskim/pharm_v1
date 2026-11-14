@@ -227,9 +227,14 @@ def build_product_state_month(con) -> None:
 
 # ---------------------------------------------------------------- 신호 확인 근거 (S3 입력)
 def build_signal_checks(con) -> None:
-    """미래 날짜 정지 토큰(R3·R3b 시작일)마다 확인 스냅샷과 결과·사유를 남긴다 (S3 signal_outcome의 근거).
-    confirm_status: confirmed / not_confirmed / unconfirmable(정지 기간이 확인 스냅샷 전에 끝남) / censored(확인 스냅샷 없음)
-    reason (확인 안 된 것): ended_before_check / product_absent / stay(확인 스냅샷에 집행정지 비고) / token_gone
+    """미래 날짜 정지 토큰(R3, R3b 시작일)마다 확인 스냅샷과 결과·사유를 남긴다 (S3 SUSPEND_SCHEDULED signal_outcome의 근거).
+    확인 스냅샷 = 신호 날짜 이후 첫 스냅샷. 실현 판정: 확인 스냅샷에 그 제품의 정지 비고(R3·R3b)가 있음 (사용자 결정 2026-11-14 8차).
+    confirm_status (→ S3 outcome)
+      confirmed            같은 토큰(같은 정지일)            → realized
+      confirmed_other_date 정지 비고는 있으나 날짜가 다름   → realized_partial (date_gap_days)
+      unverifiable         R3b 종료일 < 확인 스냅샷 기준일  → unverifiable (실현율 분모에서 뺌)
+      not_confirmed        reason: stay(집행정지 비고) / delisted(제품 없음) / note_gone(비고 사라짐) → not_realized
+      censored             확인 스냅샷 없음
     """
     con.execute("""create or replace table s2_suspend_signal_check as
         with cal as (select list_month, min(base_date) base from stg_benefit group by 1),
@@ -241,6 +246,11 @@ def build_signal_checks(con) -> None:
                           exists (select 1 from note_token t where t.product_code = j.product_code and t.list_month = j.check_month
                                   and t.token_type = j.token_type and t.token_date = j.token_date
                                   and t.token_date_end is not distinct from j.token_date_end) token_in_check,
+                          (select min(abs(datediff('day', j.token_date, t.token_date))) from note_token t
+                           where t.product_code = j.product_code and t.list_month = j.check_month
+                             and t.token_type in ('R3', 'R3b')) susp_gap_in_check,
+                          (select string_agg(distinct t.raw, ' ; ') from note_token t where t.product_code = j.product_code
+                             and t.list_month = j.check_month and t.token_type in ('R3', 'R3b')) susp_raw_in_check,
                           exists (select 1 from stg_benefit b where b.product_code = j.product_code and b.list_month = j.check_month
                                   and b.row_kind = 'product_candidate') product_in_check,
                           exists (select 1 from note_token t where t.product_code = j.product_code and t.list_month = j.check_month
@@ -249,14 +259,34 @@ def build_signal_checks(con) -> None:
                                   and t.token_type = 'R4') stay_in_signal_month
                    from j left join cal c on c.list_month = j.check_month)
         select *,
-               case when check_month is null then 'censored' when token_in_check then 'confirmed'
-                    when token_type = 'R3b' and token_date_end < check_base then 'unconfirmable'
+               case when check_month is null then 'censored'
+                    when token_in_check then 'confirmed'
+                    when susp_gap_in_check is not null then 'confirmed_other_date'
+                    when token_type = 'R3b' and token_date_end < check_base then 'unverifiable'
                     else 'not_confirmed' end confirm_status,
-               case when check_month is null or token_in_check then null
-                    when token_type = 'R3b' and token_date_end < check_base then 'ended_before_check'
-                    when not product_in_check then 'product_absent'
-                    when stay_in_check then 'stay' else 'token_gone' end reason
+               case when not token_in_check and susp_gap_in_check is not null then susp_gap_in_check end date_gap_days,
+               case when check_month is null or token_in_check or susp_gap_in_check is not null
+                         or (token_type = 'R3b' and token_date_end < check_base) then null
+                    when not product_in_check then 'delisted'
+                    when stay_in_check then 'stay' else 'note_gone' end reason
         from k order by signal_month, product_code, token_type, token_date""")
+
+
+COMMENTS = {
+    "state_asof": "스냅샷 기준일 시점의 상태. 그 스냅샷까지의 정보만 쓴다 (뒤의 스냅샷을 지워도 같다)",
+    "state_eom": "월말 상태. 이후 스냅샷으로 확인된 것(미래 신호 확인, 2개월 공백 복귀, 늦게 보인 지난 날짜)만 반영",
+    "exposure_frac": "그 달 급여된 일수 / 그 달 일수. state_eom 기준",
+    "stay_flag": "기준일 시점 값: 그 달 비고에 집행정지(R4)가 있고 기준일 이전 해제(R5)가 없음. 늦게 보인 R4·R5 날짜로 고쳐 쓰지 않는다 (날짜는 S3 이벤트 유효일)",
+    "late_note_revised": "다음 스냅샷에서 처음 보인 지난 날짜(R6 해제일·R3 정지일·R3b 시작일, 이 달 안)로 state_eom·exposure_frac을 고쳐 씀",
+    "product_role": "그 달 관측: 대체조제 행의 역할, 목록에 없으면 오렌지북 공고대조약",
+    "product_role_carried": "그 달 대체조제 값, 없으면 과거 달 대체조제 값(앞으로만 이어 씀), 없으면 오렌지북 공고대조약",
+    "role_source": "product_role_carried의 출처: observed / carried / orangebook",
+}
+
+
+def comment_columns(con) -> None:
+    for col, text in COMMENTS.items():
+        con.execute(f"comment on column product_state_month.{col} is '{text}'")
 
 
 # ---------------------------------------------------------------- 보고용 표
@@ -312,6 +342,7 @@ def write_tables(con) -> None:
     dump("suspend_signal_check", """select * from s2_suspend_signal_check""")
     dump("suspend_signal_unconfirmed_by_reason", """select token_type, substr(signal_month, 1, 4) as year, confirm_status,
                coalesce(reason, '-') reason, count(*) n, count(*) filter (where stay_in_signal_month) stay_in_signal_month,
+               min(date_gap_days) min_gap_days, max(date_gap_days) max_gap_days,
                min(product_code || ' ' || signal_month || ' ' || raw) example
         from s2_suspend_signal_check group by all order by 1, 2, 3, 4""")
     # 늦게 보인 지난 날짜: 다음 스냅샷에서 처음 보인 토큰의 날짜가 직전 스냅샷의 달 안 (그 달 행이 있는 제품)
@@ -360,6 +391,7 @@ def build_all(con) -> None:
     build_attr_scd2(con)
     build_product_state_month(con)
     build_signal_checks(con)
+    comment_columns(con)
 
 
 def main() -> None:

@@ -67,6 +67,11 @@
 | 2026-11-14 (7차) | 대체조제 목록에서 빠진 달: 관측값 컬럼은 NULL. `product_role_carried`(과거 값만 앞으로 이어 씀, 뒤의 값을 앞 달로 가져오지 않음)와 `role_source`(observed / carried / orangebook)를 둔다 | | 가장 가까운 값 양방향 |
 | 2026-11-14 (7차) | 확인되지 않은 미래 정지는 사유별로 나눈다: 집행정지 비고로 바뀜 / 정지 기간이 다음 스냅샷 전에 끝나 확인할 수 없음(`unconfirmable`, `not_realized`와 구분) / 그 밖. **`unconfirmable`을 실현율 분모에 넣을지는 사용자가 정한다** (S2 결과 0건) | | |
 | 2026-11-14 (7차) | 654700150은 지금 규칙(한 목록에만 남은 토큰 = 복귀 아님)대로 두고, S4의 60건 표본에 반드시 넣는다 | | |
+| 2026-11-14 (8차) | **늦게 보인 지난 날짜는 R6과 R3 모두 `state_eom`에 반영한다** (지금 방식 유지). R3 105행: 정지일이 직전 스냅샷 기준일보다 앞선 행 0, 모두 기준일 뒤(두 스냅샷 사이). 거슬러 고친 개월 수는 105행 모두 1개월 | 7차 반영 결과 확인 | R6만 |
+| 2026-11-14 (8차) | "확인할 수 없음" 신호는 `unverifiable`로 두고 `censored`와 구분한다. **실현율 분모에서 빼고 건수를 따로 보고한다** | | 분모에 포함 |
+| 2026-11-14 (8차) | 늦게 보인 R4·R5 날짜는 `stay_flag`에 반영하지 않는다. `stay_flag`는 기준일 시점 값이다 (컬럼 설명). 날짜는 S3에서 STAY_START, STAY_END, `stay_released` 가격 변경 이벤트의 유효일로 쓴다 | | |
+| 2026-11-14 (8차) | 미래 날짜 정지의 실현 판정: 신호 날짜 이후 첫 스냅샷에서 정지 비고가 확인됨. `not_realized` 사유는 집행정지 / 삭제 / 비고 사라짐. PLAN §3, NOTE_RULES §2 반영. 신호 유형 이름은 기존 `SUSPEND_SCHEDULED`에 반영했다 (지시의 `SUSPENSION_SCHEDULED`와 같은 신호인지 사용자 확인 대기) | 지시 4 | |
+| 2026-11-14 (8차) | "R3 비고에 종료일이 없어 비고가 사라진 건이 정지 취소인지 두 스냅샷 사이의 짧은 정지인지 구분할 수 없다"는 한계 문장은 **적지 않는다**. 비고가 사라진 건의 비고 상태를 분석한다 (사용자: 짧게 정지했다 풀리는 경우는 본 적이 없다) | 사용자 | LIMITATIONS 기록 |
 
 ## 사용자가 정해야 하는 것 (단계별로 묻는다)
 
@@ -108,4 +113,6 @@
 | 2026-11-14 (7차 반영) | **늦게 보인 지난 날짜의 범위**: 다음 스냅샷에서 처음 보인 R6 해제일·R3 정지일·R3b 시작일이 직전 스냅샷의 달 안이면 그 달의 `state_eom`·`exposure_frac`을 고쳐 쓴다 (`late_note_revised`). 그보다 이른 날짜는 고쳐 쓰지 않는다. `state_asof`는 바꾸지 않는다. 전체 기간 106행 (R3 105, R6 1) | 사용자 지시(656700050)와 `state_eom` 정의("이후 스냅샷으로 확인된 것만 반영")를 같은 유형에 적용. R3 105행은 사용자 확인 필요 | R6만 적용 |
 | 2026-11-14 (7차 반영) | `role_source`는 `product_role_carried`의 출처다. `product_role`(그 달 관측: 대체조제 행, 없으면 오렌지북)의 출처는 `in_substitute_list`로 안다 | 이름은 지시대로 두고 뜻을 정함 | |
 | 2026-11-14 (7차 반영) | `s2_suspend_signal_check`: 미래 날짜 정지 토큰(제품·달·유형·날짜) 214개마다 확인 스냅샷, `confirm_status`(confirmed / not_confirmed / unconfirmable / censored), `reason`(ended_before_check / product_absent / stay / token_gone). stay = 확인 스냅샷에 집행정지(R4) 토큰 | S3 signal_outcome의 근거 | |
+| 2026-11-14 (8차 반영) | 정지 비고가 확인됐지만 정지일이 다른 신호는 `realized_partial`(`confirmed_other_date`, `date_gap_days`). SUSPEND 이벤트 날짜는 확인 스냅샷 비고의 정지일이다 (신호 날짜를 쓰지 않음). `state_eom`은 늦게 보인 정지일 규칙으로 이미 그 날짜를 쓴다 (2022-09 39개 제품: 9/8 예고 → 9/9 정지, 9월 `exposure_frac` 8/30) | 확인된 것은 비고의 날짜. 신호 날짜는 하루 다름 | 신호 날짜 사용 |
+| 2026-11-14 (8차 반영) | `s2_suspend_signal_check`의 판정 우선순위: censored → confirmed(같은 토큰) → confirmed_other_date(정지 비고 있음) → unverifiable → not_confirmed(delisted → stay → note_gone) | 확인 스냅샷에 정지 비고와 집행정지 비고가 함께 있으면 정지가 확인된 것 (2022-09 4개 제품) | stay 우선 |
 

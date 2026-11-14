@@ -180,7 +180,9 @@ def test_suspend_signal_check_complete(con):
     rows = dict(con.execute("select confirm_status, count(*) from s2_suspend_signal_check group by 1").fetchall())
     assert sum(rows.values()) == n_tok
     bad = con.execute("""select count(*) from s2_suspend_signal_check where (confirm_status = 'confirmed') <> coalesce(token_in_check, false)
-                         or (confirm_status = 'not_confirmed' and reason is null)""").fetchone()[0]
+                         or (confirm_status = 'not_confirmed') <> (reason is not null)
+                         or (confirm_status = 'confirmed_other_date') <> (date_gap_days is not null)
+                         or confirm_status not in ('confirmed', 'confirmed_other_date', 'unverifiable', 'not_confirmed', 'censored')""").fetchone()[0]
     assert bad == 0
 
 

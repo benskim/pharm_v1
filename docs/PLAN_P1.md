@@ -48,7 +48,7 @@
 | `LISTING_SCHEDULED` | R1 등재 예정 (처음 관측된 제품) | 신호 날짜 이후 첫 스냅샷에 제품이 있고 정지·삭제가 아님 |
 | `LISTING_NOTE_EXISTING` | R1 등재 예정 (이미 급여 중인 제품) | 상태 변화 없음. 실현율 계산에서 따로 보고 |
 | `STAY_RELEASE_PRICE` | R5 집행정지 해제 및 인하 (U6 변형 포함) | 해제 후 첫 스냅샷의 인하 여부. 이벤트 쌍(STAY_END + PRICE_CHANGE)은 확인 뒤에 만든다 |
-| `SUSPEND_SCHEDULED` | R3 급여정지의 미래 날짜, R3b 기간 명시 정지의 미래 시작일 | 신호 날짜 이후 첫 스냅샷에서 같은 제품이 급여정지(같은 정지일)로 확인됨. 확인되면 SUSPEND 이벤트 날짜 = 신호 날짜 (`signal_confirmed`), 시작 달의 `exposure_frac`을 고쳐 쓴다 (`NOTE_RULES.md` §2) |
+| `SUSPEND_SCHEDULED` | R3 급여정지의 미래 날짜, R3b 기간 명시 정지의 미래 시작일 | 신호 날짜 이후 첫 스냅샷에서 같은 제품의 **정지 비고(R3·R3b)가 확인됨** (2026-11-14 8차). 같은 정지일이면 `realized`: SUSPEND 이벤트 날짜 = 신호 날짜 (`signal_confirmed`), 시작 달의 `exposure_frac`을 고쳐 쓴다. 정지일이 다르면 `realized_partial`(날짜 차이 기록): SUSPEND 이벤트 날짜 = 확인 스냅샷 비고의 정지일 (`note_benefit`/`note_substitute`). `not_realized` 사유: **집행정지**(확인 스냅샷에 정지 비고 없이 집행정지 비고) / **삭제**(확인 스냅샷에 제품 없음) / **비고 사라짐**(제품은 있고 정지·집행정지 비고 없음). R3b의 종료일이 확인 스냅샷 기준일보다 앞서면 `unverifiable`. S2 근거 표 `s2_suspend_signal_check` (`NOTE_RULES.md` §2) |
 | `RESUME_SCHEDULED` | R3b 기간 명시 정지의 미래 종료일 | 종료일 이후 첫 스냅샷에 제품이 있고, 새 정지 비고나 삭제가 없음. RESUME 이벤트 날짜는 종료일 다음 날 (`note_benefit` / `note_substitute`) |
 | `DELISTING_SCHEDULED` | R9 급여삭제 예정 | 신호 날짜 이후 첫 스냅샷에서 제품이 사라짐. **F7 재분류(코드 교체·양도양수)를 먼저 거친다**. 1건이라 A1에서 건수로만 보고 |
 
@@ -63,6 +63,7 @@
 | `realized_partial` | 실현됐지만 금액·날짜가 다름 (금액 차이와 날짜 차이를 기록) |
 | `not_realized` | 추적 기간 안에 실현되지 않음 (사유: 비고 사라짐·가격 유지 / 정지 / 삭제 / 집행정지) |
 | `censored` | 분석 끝(2025-12)까지 추적 기간이 차지 않음 |
+| `unverifiable` | 확인할 스냅샷이 오기 전에 신호의 기간이 끝나 실현 여부를 판정할 수 없음 (R3b 종료일 < 확인 스냅샷 기준일). `censored`와 구분한다. **실현율 분모에서 빼고 건수를 따로 보고한다** (2026-11-14 8차) |
 
 추적 기간은 `config/params.yaml`의 `signal_followup_months` (기본 3개월).
 
@@ -105,7 +106,7 @@ L3 분석용
 | `unpriced` | 산정불가 | 비고 또는 금액 칸의 `산정불가` |
 | `delisted` | 삭제 | 다음 스냅샷에 없음 (코드 교체·양도양수 제외) |
 
-- 집행정지는 state가 아니라 `stay_flag`. 급여는 정상이다.
+- 집행정지는 state가 아니라 `stay_flag`. 급여는 정상이다. **`stay_flag`는 기준일 시점 값이다** (그 달 비고에 R4가 있고 기준일 이전 R5 해제가 없음). 늦게 보인 R4·R5 날짜로 고쳐 쓰지 않는다.
 - `scheduled_delisting`은 state로 두지 않는다. 미래 삭제일 비고(R9, 전체 기간 1건)는 `DELISTING_SCHEDULED` 신호로만 기록한다.
 - **state는 두 컬럼이다** (2026-11-14 7차). `state_asof`: 스냅샷 기준일 시점의 상태, 그 스냅샷까지의 정보만 쓴다 (뒤의 스냅샷을 지워도 같다). `state_eom`: 월말 상태, 이후 스냅샷으로 확인된 것만 반영한다. 한 컬럼 안에서 판정 시점을 섞지 않는다. `exposure_frac`(급여된 일수 비율)은 `state_eom` 기준이다. 다음 스냅샷에서 처음 보인 지난 날짜(R6 해제일, R3 정지일, R3b 시작일)가 직전 스냅샷의 달 안이면 그 달의 `state_eom`·`exposure_frac`을 고쳐 쓴다 (`late_note_revised`). `SUSPEND_SCHEDULED`처럼 다음 스냅샷에서 확인된 뒤 고쳐 쓴 행은 `exposure_revised = true`.
 - 분석 창 시작(2022-01) 전에 시작된 집행정지는 STAY_START 이벤트를 만들지 않고 `stay_flag`만 켠다.
@@ -133,6 +134,7 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 4. 삭제는 `effective_date_lo`(직전 스냅샷 다음 날) ~ `effective_date_hi`(사라진 스냅샷 기준일).
 5. 빠진 달을 건너 생긴 변화는 `date_source = gap`, 날짜는 구간.
 6. 실현되지 않은 신호의 날짜는 어떤 이벤트에도 쓰지 않는다.
+7. 집행정지·해제의 날짜(R4 집행정지일, R5 해제·고시일)는 STAY_START, STAY_END, `stay_released` 가격 변경 이벤트의 유효일로 쓴다. 늦게 보인 R4·R5 날짜도 이벤트 유효일에만 쓰고 `stay_flag`(기준일 시점 값)는 고쳐 쓰지 않는다 (2026-11-14 8차).
 
 ### 진입·퇴출 재분류 (F7)
 1. 같은 품목기준코드의 다른 제품코드가 ±1개월 안에 사라짐 → `same_item_recode`
