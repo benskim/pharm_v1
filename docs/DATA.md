@@ -5,11 +5,11 @@
 | 폴더 | 내용 | 기간 | 쓰는 곳 | 비고 |
 |---|---|---|---|---|
 | `data/raw/benefit/` | 약제급여목록 월 스냅샷 | 2022-01 ~ 2025-12 | P1, P2 특징 | 원본 형식 그대로 (병합 parquet 또는 월별 xlsx) |
-| `data/raw/substitute/` | 저가약 대체조제 목록 월 스냅샷 | 2022-01 ~ 2025-12 | P1 | 같음 |
+| `data/raw/substitute/` | 대체조제 목록 월 스냅샷 (원본 이름 "저가약 대체조제 장려금 대상 약제목록". 복제약 목록이 아니다. `PLAN_P1.md` §4) | 2022-01 ~ 2025-12 | P1 | 같음 |
 | `data/raw/usage/` | 건보공단 의약품 사용통계 **원본 집계파일** | 2018-01 ~ 2025-12 | P1 검증, P2 목표 변수 | 받은 형식 그대로 |
 | `data/raw/master/` | 2026 약가정보 2종. `dim_drug_code_map_26` (심평원 버전 = 설계 때의 `dim_drug_master_20260831`과 같은 파일), `dim_drug_info_26` (의약품안전나라 버전 = 설계 때의 `dim_drug_info`) | 최신본 | P1 연결, 속성표 | 시계열로 쓰지 않음 |
 | `data/raw/price_2026/` | 비어 있음. 약가정보 2종은 `master/`에 있다 | | | |
-| `data/raw/orangebook/` | 오렌지북(복제약) 2026 최신. `dim_orange_book` (= 설계 때의 `dim_generic_master`) | 최신본 | 오리지널·제네릭 구분 | 시계열로 쓰지 않음 |
+| `data/raw/orangebook/` | 오렌지북(복제약) 2026 최신. `dim_orange_book` (= 설계 때의 `dim_generic_master`) | 최신본 | 공고대조약 표시 확인 (속성표). 1차는 오리지널을 구분하지 않는다 | 시계열로 쓰지 않음 |
 | `data/sample/` | 설계에 쓴 표본 parquet 8개 (설계 때 파일명) | 2024-01 ~ 2025-12 | 회귀 시험 | `fact_cmpn_stat_2023~2025`는 사용자가 원본을 가공한 집계본 |
 
 표본 파일: `benefit_snapshot_table_2425.parquet`, `substitute_snapshot_table_2425.parquet`, `fact_cmpn_stat_2023.parquet`, `fact_cmpn_stat_2024.parquet`, `fact_cmpn_stat_2025.parquet`, `dim_drug_master_20260831.parquet`, `dim_drug_info.parquet`, `dim_generic_master.parquet`. `precheck_v3.py`는 파일명 키워드(`benefit_snapshot`, `substitute_snapshot`, `dim_drug_master`, `fact_cmpn_stat_`)로 찾으므로 표본 폴더에서는 설계 때 파일명을 쓴다.
@@ -66,7 +66,7 @@
 ## 4. 알려진 위험
 - **컬럼이 파일마다 다르다.** 표본에서도 `목록정비전코드`는 2024년과 2025-09~10에만, `식약분류`는 2025-10에만, `주성분개수`는 2025-11~12에만 있었다. 적재기는 `config/schema_map.yaml`로 동작한다.
 - **2022~2023 스냅샷은 표본에 없던 구간이다.** 새 비고 문형과 컬럼이 나올 수 있다.
-- **제품코드 폭.** 2025-11, 2025-12는 앞자리 0이 빠져 있었다(8자리 2,357행). 9자리로 채운다.
+- **제품코드 폭.** 2025-11, 2025-12는 앞자리 0이 빠져 있었다(8자리 2,357행). 숫자 8자리만 앞에 0을 채워 9자리로 만든다. 7자리 이하는 채우지 않는다(전체 기간 0건). 0 채움 후 숫자 9자리가 아니면 `row_kind = non_product`로 stg에 두고 note_token·원장에서 뺀다 (전체 기간 1행: 2022-09 `243001ACS`).
 - **기준일이 1일이 아닌 달이 있다** (2025-03-04). 월 키는 YYYY-MM.
 - **목록정비로 제품코드가 바뀐 시기**가 2022~2023에 있을 수 있다. `목록정비전코드`로 옛 코드와 새 코드를 잇는다.
 - **2026 최신본은 생존 편향이 있다.** 그사이 삭제된 제품은 없다. 연결률을 보고한다.

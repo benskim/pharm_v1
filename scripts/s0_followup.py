@@ -246,7 +246,9 @@ def r3_combined(con):
 
 
 def product_role(con):
-    """사용자 정의(2차 답변 3): reference / generic / NULL. 근거 충돌만 센다 (컬럼은 만들지 않음)."""
+    """S0 2차 점검용(기록). 2차 답변의 reference / generic 정의로 근거가 겹치는 제품을 센다.
+    3차 결정(DECISIONS 2026-11-14)으로 정의가 바뀌었다: product_role = reference / bioequiv / NULL,
+    충돌은 대조약 여부가 다를 때만. 대체조제 목록은 복제약 목록이 아니다."""
     con.execute(f"""create or replace table rs as select lpad(제품코드,9,'0') pc, cast("②품목기준코드" as bigint) item,
         coalesce(bool_or(coalesce("생동대조약 여부","생동대조약여부")='○'), false) s_ref,
         coalesce(bool_or("생동인정여부(공고번호)" like '○%'), false) s_gen,

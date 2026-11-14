@@ -80,7 +80,8 @@ L1 정규화
 L2 원장
  ├ product_state_month  제품×월: state, price_listed, price_pending, pending_date, stay_flag,
  │                      exposure_frac, exposure_revised, state_revised, resume_unconfirmed,
- │                      in_substitute_list, product_role (reference / generic / NULL), role_source
+ │                      in_substitute_list, product_role (reference / bioequiv / NULL), role_source,
+ │                      is_bioequiv, role_conflict
  ├ product_attr_scd2    업체명·제품명·주성분코드의 유효 구간
  ├ bridge_product_item  제품코드 → 품목기준코드
  ├ bridge_code_recode   옛 제품코드 → 새 제품코드 (목록정비전코드)
@@ -109,13 +110,17 @@ L3 분석용
 - 한 달 안에서 상태가 바뀌면 월말 상태를 `state`에, 급여된 일수 비율을 `exposure_frac`에 둔다. `SUSPEND_SCHEDULED`처럼 다음 스냅샷에서 확인된 뒤 고쳐 쓴 행은 `exposure_revised = true`.
 - 분석 창 시작(2022-01) 전에 시작된 집행정지는 STAY_START 이벤트를 만들지 않고 `stay_flag`만 켠다.
 - 종료일 없는 급여정지(R3)의 복귀: (a) R6 해제 비고, 또는 (b) 두 목록 어디에도 그 정지 토큰이 없는 달이 2개월 연속. (b)의 RESUME 유효일은 토큰이 처음 사라진 달의 1일(`snapshot_first`). 첫 달은 `suspended`를 유지하고, 둘째 달에 확정되면 첫 달 행을 고쳐 쓴다(`state_revised = true`). 한 달 공백 뒤 같은 정지일로 다시 나타나면 이벤트 없음. 분석 끝 한 달 공백은 `resume_unconfirmed = true` (`NOTE_RULES.md` R3).
-- **`is_original`은 쓰지 않는다** ("제네릭 표시 없음 = 오리지널"은 추정). 대신 `product_role`:
-  - `reference`: 대체조제 목록 `생동대조약 여부` = ○, 또는 오렌지북 `공고대조약` = O
-  - `generic`: 대체조제 목록 `생동인정여부` = ○, 또는 오렌지북 `제네릭의약품` = O
-  - NULL: 어느 쪽 근거도 없음 (연결 안 된 제품 포함)
-  - `role_source`: substitute / orangebook / both. 오렌지북 연결 경로는 1) `code_map`(제품코드 → 품목기준코드), 2) 대체조제 목록 `②품목기준코드`. 경로 2는 대체조제 목록 제품에만 있어 generic 쪽으로 치우친다.
-  - 두 근거가 충돌하는 제품(reference와 generic 근거가 함께 있음)은 S2에서 건수와 사례를 보고하고, 판정은 사용자가 정한다. S0 점검: 47개 (대체조제 안에서 대조약○·생동인정○ 32개, 대체조제 대조약○ vs 오렌지북 제네릭 15개).
-  - 한계: 대조약이 항상 오리지널은 아니다.
+- **대체조제 목록의 의미**: 대체조제는 처방약 대신 성분·함량·제형이 같고 동등성이 인정된 다른 제품으로 조제하는 것이다. 목록에 실렸다는 것은 그 제품의 역할(대조약인지, 생동인정 품목인지)을 말해 줄 뿐, 복제약 여부도 저가약 여부도 말해 주지 않는다. "저가약"은 제품 속성으로 쓰지 않고, 같은 그룹 안 그 달 상한금액 비교로만 쓴다. 원본 목록 이름("저가약 대체조제 장려금 대상 약제목록")은 그대로 둔다.
+- **1차에서는 오리지널과 복제약을 구분하지 않는다.** 초기 설계의 `is_original`은 쓰지 않는다. 컬럼 이름·값·표 이름에 "오리지널", "제네릭"을 쓰지 않는다 (한계 절과 사례 설명의 문장에서는 쓸 수 있다).
+- **출처별 원본 값 보존**: 대체조제 목록의 `생동대조약 여부`·`생동인정여부`·`의약동등`, 오렌지북의 `공고대조약` 표시와 `제네릭의약품` 표시를 각각 별도 컬럼으로 보존한다. 서로 다른 속성이다. 오렌지북의 `제네릭의약품` 표시를 대체조제 목록의 생동인정과 같은 것으로 보지 않는다.
+- **`product_role`** (`reference` / `bioequiv` / NULL)과 `role_source`:
+  - 대체조제 목록에 있는 제품: `생동대조약 여부` = ○이면 `reference`. 대조약이 아니고 생동인정이면 `bioequiv`. `role_source = substitute`.
+  - 대조약 여부와 생동인정 여부를 서로 배타적으로 강제하지 않는다. 대조약이면서 생동인정 정보도 있으면(`의약동등 = 6`) `product_role = reference`, 생동인정은 `is_bioequiv`(출처와 함께)에 보존한다.
+  - 대체조제 목록에 없는 제품: 오렌지북 `공고대조약` = O이면 `reference`, `role_source = orangebook`. 그 밖에는 NULL.
+  - 오렌지북의 `제네릭의약품` 표시만으로는 `product_role`을 채우지 않는다.
+  - 오렌지북 연결 경로: 1) `code_map`(제품코드 → 품목기준코드), 2) 대체조제 목록 `②품목기준코드`. 경로 2는 대체조제 목록에 실린 제품에만 있으므로 연결률이 경로별로 다르다. 경로를 기록한다.
+- **`role_conflict`**: 두 출처에서 같은 개념은 대조약 여부 하나다 (대체조제 `생동대조약 여부` ↔ 오렌지북 `공고대조약`). 둘이 다를 때만 `role_conflict = true`로 두고 대체조제 목록 값을 채택한다(`role_source`에 채택 출처). `의약동등 = 6`처럼 대조약 ○와 생동인정 ○가 함께 붙은 것은 충돌이 아니다. S1 점검: 오렌지북에 연결된 대체조제 목록 제품 9,350개에서 대조약 여부가 다른 제품 0개.
+- 한계: 대조약이 항상 오리지널은 아니다. 1차는 오리지널을 구분하지 않는다.
 
 ### event_type
 LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), SUSPEND, RESUME, STAY_START, STAY_END, TRANSFER (kind: same_item_recode / transfer_by_name / same_firm_swap / list_recode), ATTR_CHANGE.
@@ -143,7 +148,7 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 
 ### A. 신호의 실현율과 시차 (본론)
 - **A1 실현율 표**: 신호 유형 × 연도별 신호 수, `realized` / `realized_partial` / `not_realized` / `censored` 건수와 비율. 실현율은 `censored`를 뺀 분모로 계산하고 Wilson 95% 구간을 붙인다. `DELISTING_SCHEDULED`(1건)는 실현율 없이 건수로만 보고한다.
-  - **보조 표**: `product_role` 분해 (`reference` / `generic` / 모름). 근거가 대체조제 목록 쪽으로 치우치므로 본 표에 넣지 않는다. 표 앞에 역할별 제품 수와 비율을 연도별·삭제 여부별로, 오렌지북 연결률을 경로별로 적는다. "대조약 = 오리지널"로 쓰지 않는다.
+  - **보조 표**: 분해는 대조약 / 생동인정 / 모름 (`product_role` = `reference` / `bioequiv` / NULL). 역할 근거가 대체조제 목록에 실린 제품에만 충분히 있으므로 본 표에 넣지 않는다. 표 앞에 역할별 제품 수와 비율을 연도별·삭제 여부별·`role_source`별로 적는다. `role_conflict` 제품을 포함한 결과를 쓰고, 뺀 결과와의 차이를 한 줄로 적는다. "대조약 = 오리지널"로 쓰지 않는다.
 - **A2 시차 분포**: 신호 발행 월 → 신호 날짜 → 실현 확인 스냅샷. 일수 분포와 "몇 번째 스냅샷에서 확인됐나".
 - **A3 실현되지 않은 신호**: 사유별 건수와 사례 표. 숨기지 않는다.
 - **A4 사용통계 검증**: 실현된 가격 신호에서 성분 원외 단가(청구금액 ÷ 청구수량)가 (a) 신호 날짜가 속한 달과 (b) 스냅샷 관측월 중 언제 움직였는지 비교한다. 월중 적용은 `exposure_frac`으로 부분 월 변화까지 맞는지 본다. 대상은 성분 내 제품의 절반 이상이 같은 신호를 가진 경우로 한정하고, 대상 수·제외 수(비공개로 빠진 성분 포함)를 먼저 보고한다.
@@ -169,7 +174,7 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 |---|---|---|
 | **S0** 자료 점검 (P1·P2 공통) | `data/raw/` 전수 조사 | `docs/DATA.md` §5의 6개 항목 보고. `python reference/precheck_v3.py data/sample` 출력이 `reference/precheck_v3_output.md`와 일치. Makefile 골격과 `config/schema_map.yaml` 초안. **구현 없이 점검만** |
 | **S1** 적재·비고 파서 | L1 테이블 | 비고가 있는 모든 행이 type을 가짐 (`unresolved` 포함, 건수 보고). R1~R7·R3b·R9·P1~P4 문형 테스트 통과 (U1~U9 변형 포함: U1→R4, U4·U5→R2, U6→R5, U9→R1, U2·U3·U8→R3b 시작일·종료일, U7→R9). `is_future` 판정 테스트 (기간 명시 정지는 시작일·종료일 각각). 표본 구간 유형별 행 수가 reference F2와 일치. 원본 행 수 = stg 행 수. stg_usage 재집계 = 가공본 (S0에서 확인한 범위) |
-| **S2** 상태·속성·연결 | `product_state_month`, `product_attr_scd2`, 두 bridge, 오렌지북 연결 | 제품×월 행 수 = 원본 행 수. 표본 구간 2025-11의 27행이 `scheduled_listing` 17 / `reimbursed` 10. 급여정지·집행정지 구간 수가 reference F5와 일치. 기간 명시 정지는 종료일 뒤 비고가 남아도 복귀 (합성 시험). 종료일 없는 정지의 복귀 규칙 합성 시험: 1개월 공백 후 재등장(이벤트 없음, 실데이터 3건 644914120·644914130·644914140 포함), 2개월 연속 공백(첫 달 고쳐 쓰기, RESUME 유효일 = 첫 공백 달 1일), 한 목록에만 남은 토큰(복귀 아님), 분석 끝 1개월 공백(`resume_unconfirmed`). 창 시작 전 집행정지는 `stay_flag`만 (합성 시험). 품목·오렌지북 연결률을 연도별·삭제 여부별·경로별로 보고. `product_role`·`role_source`, 역할별 제품 수(연도별·삭제 여부별), 근거 충돌 건수와 사례 보고 |
+| **S2** 상태·속성·연결 | `product_state_month`, `product_attr_scd2`, 두 bridge, 오렌지북 연결 | 제품×월 행 수 = 원본 행 수 − `non_product` 행 수 (S1 `row_kind`). 표본 구간 2025-11의 27행이 `scheduled_listing` 17 / `reimbursed` 10. 급여정지·집행정지 구간 수가 reference F5와 일치. 기간 명시 정지는 종료일 뒤 비고가 남아도 복귀 (합성 시험). 종료일 없는 정지의 복귀 규칙 합성 시험: 1개월 공백 후 재등장(이벤트 없음, 실데이터 3건 644914120·644914130·644914140 포함), 2개월 연속 공백(첫 달 고쳐 쓰기, RESUME 유효일 = 첫 공백 달 1일), 한 목록에만 남은 토큰(복귀 아님), 분석 끝 1개월 공백(`resume_unconfirmed`). 창 시작 전 집행정지는 `stay_flag`만 (합성 시험). 품목·오렌지북 연결률을 연도별·삭제 여부별·경로별로 보고. `product_role`(`reference`/`bioequiv`/NULL)·`role_source`·`is_bioequiv`·`role_conflict`, 출처별 원본 값 컬럼. 역할별 제품 수(연도별·삭제 여부별·`role_source`별), `role_conflict` 건수와 사례 보고. 합성 시험: `의약동등 = 6` → `reference` + `is_bioequiv`, 오렌지북 `제네릭의약품` 표시만 있는 제품 → NULL, 대조약 값 불일치 → 대체조제 값 채택 |
 | **S3** 신호·이벤트 원장 | `signal_ledger`, `signal_outcome`, `event_ledger`, 대조표 | 표본 구간에서 F4·F7 숫자 재현. 모든 신호가 outcome 하나를 가짐. 실현되지 않은 신호의 날짜가 이벤트에 쓰이지 않음(테스트). `event_id`·`signal_id` 결정적. 스냅샷을 한 달씩 추가한 결과 = 한 번에 만든 결과 (`exposure_frac`·복귀 첫 달 `state` 고쳐 쓰기 포함). 새 신호 3개 합성 시험: `SUSPEND_SCHEDULED` 확인/미확인, `RESUME_SCHEDULED` 실현/새 정지로 미실현, `DELISTING_SCHEDULED` 삭제/코드 교체(F7)로 미실현. U6: 신호 달에는 이벤트 없음, 다음 달 금액 확인 뒤 STAY_END+PRICE_CHANGE. 두 목록 중복 신호가 하나로 합쳐지고 분모가 한 번만 세짐 |
 | **S4** 분석 A | A1~A6 | A1 실현율 표(연도별, 구간 포함), A4 대상·제외 수 먼저. `outputs/validation/sample_60.csv` (라벨 비움). **사용자 라벨 후** 정밀도 계산 |
 | **S5** 분석 B·C | B1, B2, C 순위표 | 한계 절이 결과보다 먼저. 표본 탈락 단계표 |
