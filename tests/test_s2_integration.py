@@ -210,3 +210,48 @@ def test_state_asof_ignores_later_snapshots_real(con, truncated):
     b = con.execute(q, [cut]).fetchall()
     assert len(a) == len(b) and a == b
 
+
+def test_external_evidence_kyongbo(con):
+    """2025-06 경보제약 23건: not_realized, 집행정지, reason_source = external, 근거 링크 (사용자 결정 9차)"""
+    rows = con.execute("""select reason, reason_source, evidence from s2_suspend_signal_check
+                          where signal_month = '2025-06' and token_date = '2025-06-24'""").fetchall()
+    assert len(rows) == 23
+    for reason, src, ev in rows:
+        assert (reason, src) == ("stay", "external")
+        for url in ("https://dailypharm.com/user/news/4876", "https://dailypharm.com/user/news/4216",
+                    "https://www.medigatenews.com/news/1252800688"):
+            assert url in ev
+    assert con.execute("""select count(*) from s2_suspend_signal_check where outcome = 'not_realized'
+                          and reason_source not in ('data', 'external', 'data+external')""").fetchone()[0] == 0
+
+
+def test_shifted_date_2022_09(con):
+    """2022-09 예고 9/8 → 확인 9/9: realized_partial, +1일, 이벤트 유효일 9/9 (사용자 결정 9차)"""
+    rows = con.execute("""select outcome, date_gap_days, event_effective_date from s2_suspend_signal_check
+                          where signal_month = '2022-09' and token_date = '2022-09-08'""").fetchall()
+    assert len(rows) == 39
+    assert set(rows) == {("realized_partial", 1, __import__("datetime").date(2022, 9, 9))}
+    # 예고 날짜가 이벤트 유효일로 쓰이는 것은 같은 날짜로 확인된 경우뿐
+    assert con.execute("""select count(*) from s2_suspend_signal_check
+                          where event_effective_date = token_date and outcome <> 'realized'""").fetchone()[0] == 0
+
+
+def test_nominal_base_date_comments(con):
+    c = dict(con.execute("""select table_name || '.' || column_name, comment from duckdb_columns()
+                            where table_name in ('snapshot_inventory', 'note_token', 'product_state_month')""").fetchall())
+    assert c["snapshot_inventory.base_date"].startswith("기준일: 파일명 기준 명목 날짜")
+    assert "명목 기준일" in c["note_token.is_future"]
+    assert "명목 기준일" in c["product_state_month.state_asof"]
+    assert "명목 기준일" in c["product_state_month.stay_flag"]
+
+
+def test_donga_2022_05_evidence(con):
+    """2022-05 동아에스티 72건: not_realized, 집행정지, reason_source = data+external, 데이터 근거 + 링크 2개 (사용자 결정 10차)"""
+    rows = con.execute("""select outcome, reason, reason_source, evidence from s2_suspend_signal_check
+                          where signal_month = '2022-05' and token_type = 'R3b' and token_date = '2022-08-01'""").fetchall()
+    assert len(rows) == 72
+    for outcome, reason, src, ev in rows:
+        assert (outcome, reason, src) == ("not_realized", "stay", "data+external")
+        assert ev.startswith("데이터: 2022-08 집행정지 비고")
+        assert "https://dailypharm.com/user/news/39450" in ev and "https://www.dailypharm.com/user/news/33781" in ev
+

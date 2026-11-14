@@ -166,3 +166,15 @@ def test_diff_unexplained_after_original_check(con):
     assert got == {"2022-01": 6, "2022-03": 2}
     assert con.execute("""select n_explained_other from snapshot_inventory
                           where source_list = 'benefit' and list_month = '2023-11'""").fetchone()[0] == 3
+
+
+def test_filename_revision_date(con):
+    """원본 파일명의 '_1.21.수정' (data/raw 소스파일명에서 손으로 옮긴 값)"""
+    got = dict(con.execute("""select list_month, filename_revision_date from snapshot_inventory
+                              where source_list = 'benefit' and list_month in ('2022-01', '2022-02', '2022-11', '2023-04', '2023-07', '2024-01')""").fetchall())
+    D = __import__("datetime").date
+    assert got == {"2022-01": D(2022, 1, 21), "2022-02": D(2022, 1, 28), "2022-11": D(2022, 10, 28),
+                   "2023-04": None, "2023-07": D(2023, 6, 30), "2024-01": None}
+    n = con.execute("select count(*) from snapshot_inventory where filename_revision_date is not null").fetchone()[0]
+    assert n == 20
+

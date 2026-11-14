@@ -199,6 +199,21 @@ def build_usage_obs(con, start: str, end: str) -> None:
 EXPLAINED_ROWNO_DUP = {("benefit", "2023-11")}
 
 
+S1_COMMENTS = {
+    ("snapshot_inventory", "base_date"): "기준일: 파일명 기준 명목 날짜. 실제 작성 시점은 그 달 안의 이후일 수 있음 (파일이 그 달 안에 고쳐 배포되고 파일명은 바뀌지 않음)",
+    ("snapshot_inventory", "filename_revision_date"): "원본 파일명의 수정일 ('_1.21.수정'). 있는 달만. 명목 기준일보다 뒤면 그 뒤의 정보가 들어 있을 수 있음",
+    ("note_token", "base_date"): "스냅샷의 명목 기준일 (snapshot_inventory.base_date와 같음)",
+    ("note_token", "is_future"): "token_date > 명목 기준일. 명목 기준일 기준 판정 (실제 작성일 기준 아님)",
+    ("note_token", "is_future_end"): "token_date_end > 명목 기준일 (R3b 종료일). 명목 기준일 기준",
+}
+
+
+def comment_s1(con) -> None:
+    for (t, col), text in S1_COMMENTS.items():
+        esc = text.replace("'", "''")
+        con.execute(f"comment on column {t}.{col} is '{esc}'")
+
+
 def build_snapshot_inventory(con, files: dict, start: str, end: str) -> None:
     pieces = []
     for lst, paths in files.items():
@@ -232,6 +247,12 @@ def build_snapshot_inventory(con, files: dict, start: str, end: str) -> None:
                coalesce(fr.n_future_listing, 0) n_future_listing,
                case when (lists.source_list, cal.list_month) in ({ex}) then s.n_rowno_dup else 0 end n_explained_other,
                diff_vs_filename - coalesce(fr.n_future_listing, 0) - s.n_non_product - n_explained_other as diff_unexplained,
+               -- 파일명의 수정일 '_1.21.수정' (2022-01~2023-11 급여목록 일부). 명목 기준일보다 뒤일 수 있다
+               case when regexp_matches(s.source_file, '_[0-9]{{1,2}}\\.[0-9]{{1,2}}\\.\\s*수정') then
+                    make_date(cast(year(s.base_date) as bigint)
+                                - case when cast(regexp_extract(s.source_file, '_([0-9]{{1,2}})\\.([0-9]{{1,2}})\\.\\s*수정', 1) as int) > month(s.base_date) + 6 then 1 else 0 end,
+                              cast(regexp_extract(s.source_file, '_([0-9]{{1,2}})\\.([0-9]{{1,2}})\\.\\s*수정', 1) as bigint),
+                              cast(regexp_extract(s.source_file, '_([0-9]{{1,2}})\\.([0-9]{{1,2}})\\.\\s*수정', 2) as bigint)) end filename_revision_date,
                case when diff_vs_filename > 0 then 'rows_gt_filename' when diff_vs_filename < 0 then 'filename_gt_rows'
                     when diff_vs_filename = 0 then 'equal' end as diff_direction,
                (select list_sort(flatten(list(c.cols))) from inv_cols c where c.source_list = lists.source_list and c.list_month = cal.list_month) columns_nonblank
@@ -289,6 +310,7 @@ def main() -> None:
     build_note_token(con)
     print(f"note_token: {con.execute('select count(*) from note_token').fetchone()[0]:,}개")
     build_snapshot_inventory(con, files, p1["start_month"], p1["end_month"])
+    comment_s1(con)
     build_stg_usage(con, str(RAW / "usage" / "cmpn_stat_*" / "MEDICINE_*.csv"), SCHEMA["sido_merge"])
     print(f"stg_usage: {con.execute('select count(*) from stg_usage').fetchone()[0]:,}행")
     build_usage_obs(con, p2["start_month"], p2["end_month"])

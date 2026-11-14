@@ -48,7 +48,7 @@
 | `LISTING_SCHEDULED` | R1 등재 예정 (처음 관측된 제품) | 신호 날짜 이후 첫 스냅샷에 제품이 있고 정지·삭제가 아님 |
 | `LISTING_NOTE_EXISTING` | R1 등재 예정 (이미 급여 중인 제품) | 상태 변화 없음. 실현율 계산에서 따로 보고 |
 | `STAY_RELEASE_PRICE` | R5 집행정지 해제 및 인하 (U6 변형 포함) | 해제 후 첫 스냅샷의 인하 여부. 이벤트 쌍(STAY_END + PRICE_CHANGE)은 확인 뒤에 만든다 |
-| `SUSPEND_SCHEDULED` | R3 급여정지의 미래 날짜, R3b 기간 명시 정지의 미래 시작일 | 신호 날짜 이후 첫 스냅샷에서 같은 제품의 **정지 비고(R3·R3b)가 확인됨** (2026-11-14 8차). 같은 정지일이면 `realized`: SUSPEND 이벤트 날짜 = 신호 날짜 (`signal_confirmed`), 시작 달의 `exposure_frac`을 고쳐 쓴다. 정지일이 다르면 `realized_partial`(날짜 차이 기록): SUSPEND 이벤트 날짜 = 확인 스냅샷 비고의 정지일 (`note_benefit`/`note_substitute`). `not_realized` 사유: **집행정지**(확인 스냅샷에 정지 비고 없이 집행정지 비고) / **삭제**(확인 스냅샷에 제품 없음) / **비고 사라짐**(제품은 있고 정지·집행정지 비고 없음). R3b의 종료일이 확인 스냅샷 기준일보다 앞서면 `unverifiable`. S2 근거 표 `s2_suspend_signal_check` (`NOTE_RULES.md` §2) |
+| `SUSPEND_SCHEDULED` | R3 급여정지의 미래 날짜, R3b 기간 명시 정지의 미래 시작일. 유형을 나누지 않고 `source_rule`(R3 / R3b)로 구분 (9차) | 신호 날짜 이후 첫 스냅샷에서 같은 제품의 **정지 비고(R3·R3b)가 확인됨** (2026-11-14 8차). 같은 정지일이면 `realized`: SUSPEND 이벤트 날짜 = 신호 날짜 (`signal_confirmed`), 시작 달의 `exposure_frac`을 고쳐 쓴다. 정지일이 다르면 `realized_partial`(날짜 차이 기록, 예: 2022-09 39건 +1일): SUSPEND 이벤트 날짜 = 확인된 비고의 정지일 (`note_benefit`/`note_substitute`). **예고 날짜는 어떤 이벤트에도 쓰지 않는다.** `not_realized` 사유에는 출처 `reason_source`(data / external)와 근거 `evidence`를 둔다. external은 외부 자료로 정한 사유(링크)이고, 실현율 표에서 따로 센다. `not_realized` 사유: **집행정지**(확인 스냅샷에 정지 비고 없이 집행정지 비고) / **삭제**(확인 스냅샷에 제품 없음) / **비고 사라짐**(제품은 있고 정지·집행정지 비고 없음). R3b의 종료일이 확인 스냅샷 기준일보다 앞서면 `unverifiable`. S2 근거 표 `s2_suspend_signal_check` (`NOTE_RULES.md` §2) |
 | `RESUME_SCHEDULED` | R3b 기간 명시 정지의 미래 종료일 | 종료일 이후 첫 스냅샷에 제품이 있고, 새 정지 비고나 삭제가 없음. RESUME 이벤트 날짜는 종료일 다음 날 (`note_benefit` / `note_substitute`) |
 | `DELISTING_SCHEDULED` | R9 급여삭제 예정 | 신호 날짜 이후 첫 스냅샷에서 제품이 사라짐. **F7 재분류(코드 교체·양도양수)를 먼저 거친다**. 1건이라 A1에서 건수로만 보고 |
 
@@ -86,9 +86,9 @@ L2 원장
  ├ product_attr_scd2    업체명·제품명·주성분코드의 유효 구간
  ├ bridge_product_item  제품코드 → 품목기준코드
  ├ bridge_code_recode   옛 제품코드 → 새 제품코드 (목록정비전코드)
- ├ signal_ledger        signal_id, signal_type, product_code, market_c4, issued_month,
+ ├ signal_ledger        signal_id, signal_type, source_rule, product_code, market_c4, issued_month,
  │                      signal_date, amount, source_list, raw
- ├ signal_outcome       signal_id, outcome, realized_month, lag_days, amount_gap, reason
+ ├ signal_outcome       signal_id, outcome, realized_month, lag_days, amount_gap, date_gap_days, reason, reason_source, evidence
  └ event_ledger         event_id, event_type, product_code, market_c4, observed_month,
                         effective_date, effective_date_lo/hi, date_source, kind, signal_id, evidence
 
@@ -150,7 +150,7 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 ## 5. 분석
 
 ### A. 신호의 실현율과 시차 (본론)
-- **A1 실현율 표**: 신호 유형 × 연도별 신호 수, `realized` / `realized_partial` / `not_realized` / `censored` 건수와 비율. 실현율은 `censored`를 뺀 분모로 계산하고 Wilson 95% 구간을 붙인다. `DELISTING_SCHEDULED`(1건)는 실현율 없이 건수로만 보고한다.
+- **A1 실현율 표**: 신호 유형 × 연도별 신호 수, `realized` / `realized_partial` / `not_realized` / `censored` 건수와 비율. 실현율은 `censored`와 `unverifiable`을 뺀 분모로 계산하고(두 건수는 따로 적는다) Wilson 95% 구간을 붙인다. **실현율은 하나만 낸다** (출처별 실현율을 따로 내지 않는다). `not_realized` 건수는 `reason_source`(data / external / data+external)별로 따로 적는다 (10차). `DELISTING_SCHEDULED`(1건)는 실현율 없이 건수로만 보고한다.
   - **보조 표**: 분해는 대조약 / 생동인정 / 모름 (`product_role` = `reference` / `bioequiv` / NULL). 역할 근거가 대체조제 목록에 실린 제품에만 충분히 있으므로 본 표에 넣지 않는다. 표 앞에 역할별 제품 수와 비율을 연도별·삭제 여부별·`role_source`별로 적는다. `role_conflict` 제품을 포함한 결과를 쓰고, 뺀 결과와의 차이를 한 줄로 적는다. "대조약 = 오리지널"로 쓰지 않는다.
 - **A2 시차 분포**: 신호 발행 월 → 신호 날짜 → 실현 확인 스냅샷. 일수 분포와 "몇 번째 스냅샷에서 확인됐나".
 - **A3 실현되지 않은 신호**: 사유별 건수와 사례 표. 숨기지 않는다.

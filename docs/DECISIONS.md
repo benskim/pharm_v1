@@ -72,6 +72,14 @@
 | 2026-11-14 (8차) | 늦게 보인 R4·R5 날짜는 `stay_flag`에 반영하지 않는다. `stay_flag`는 기준일 시점 값이다 (컬럼 설명). 날짜는 S3에서 STAY_START, STAY_END, `stay_released` 가격 변경 이벤트의 유효일로 쓴다 | | |
 | 2026-11-14 (8차) | 미래 날짜 정지의 실현 판정: 신호 날짜 이후 첫 스냅샷에서 정지 비고가 확인됨. `not_realized` 사유는 집행정지 / 삭제 / 비고 사라짐. PLAN §3, NOTE_RULES §2 반영. 신호 유형 이름은 기존 `SUSPEND_SCHEDULED`에 반영했다 (지시의 `SUSPENSION_SCHEDULED`와 같은 신호인지 사용자 확인 대기) | 지시 4 | |
 | 2026-11-14 (8차) | "R3 비고에 종료일이 없어 비고가 사라진 건이 정지 취소인지 두 스냅샷 사이의 짧은 정지인지 구분할 수 없다"는 한계 문장은 **적지 않는다**. 비고가 사라진 건의 비고 상태를 분석한다 (사용자: 짧게 정지했다 풀리는 경우는 본 적이 없다) | 사용자 | LIMITATIONS 기록 |
+| 2026-11-14 (9차) | 신호 유형은 `SUSPEND_SCHEDULED` 하나. R3·R3b는 `source_rule`로 구분한다 | | 유형 분리, 이름 변경 |
+| 2026-11-14 (9차) | 정지일이 밀린 39건(2022-09, 9/8 → 9/9)은 `realized_partial`, 날짜 차이 +1일. 정지 이벤트의 유효일은 확인된 비고의 날짜(9/9). 예고 날짜(9/8)는 어떤 이벤트에도 쓰지 않는다 | | |
+| 2026-11-14 (9차) | 2025-06 경보제약 23건: `not_realized`, 사유 "집행정지", `reason_source = external`, `evidence` = 근거 링크 3개 (dailypharm 4876: 2025-06-18 잠정 집행정지, dailypharm 4216: 2025-07-09 본 집행정지 인용, medigatenews 1252800688: 복지부 급여중지 안내와 유예). 데이터로 확인한 사유는 `reason_source = data`. 실현율 표에서 두 출처를 따로 센다. LIMITATIONS L5 | 외부 보도 (사용자 제공) | 비고 사라짐 |
+| 2026-11-14 (9차) | **스냅샷 기준일은 파일명에서 온 명목 날짜다.** 파일은 그 달 안에 고쳐 배포될 수 있고 파일명은 바뀌지 않는다. 스냅샷에 기준일 뒤에 알려진 정보가 들어 있을 수 있다. `state_asof`·`is_future`·`stay_flag`의 판정은 바꾸지 않고 컬럼 설명에 "명목 기준일 기준"으로 적는다. DATA.md §4, LIMITATIONS L4 | 사용자 확인 (예: 2025-06 경보제약. 공시 06-12, 복지부 안내 06-16) | |
+| 2026-11-14 (9차) | **P2 누수 규칙**: M월 스냅샷에서 만든 신호 특징은 M+1월 이후의 origin에서만 쓴다. T3 누수 시험도 이 기준 (PLAN_P2 §2·§7, STAGES T3). 구현은 T3 | 명목 기준일 | origin 시점에 기준일이 지난 스냅샷 |
+| 2026-11-14 (10차) | **동아에스티 72건 해석 정정**: 같은 칸의 `집행정지(22.5.3.)`는 122개 품목 약가인하에 대한 집행정지이고 8월 급여정지에 대한 것이 아니다. 8월 급여정지에 대한 집행정지는 그 뒤(5/10 잠정, 6/3 연장, 12/1 재연장). 5월 파일 시점에 급여정지는 실제로 예정된 상태였다. 72건은 `not_realized`, 사유 "집행정지". `reason_source = data+external` (데이터: 이후 스냅샷의 집행정지 비고 / 외부: dailypharm 39450, 33781). 실현율은 하나만 낸다 | 사용자 확인, 외부 보도 | |
+| 2026-11-14 (10차) | NOTE_RULES §3 규칙: 한 칸에 집행정지와 다른 처분 비고가 함께 있어도 집행정지가 어느 처분을 막는지는 비고로 알 수 없다. 같은 칸에 있다는 이유로 둘을 연결하지 않는다 | 2022-05 동아에스티 | 같은 칸이면 연결 |
+| 2026-11-14 (10차) | P2 T3: M3를 "M월 파일을 M월부터 사용"과 "M+1월부터 사용" 두 기준으로 돌려 차이를 보고한다. 앞의 것은 미래 정보가 섞인 비교용 상한, 결과로는 뒤의 것만 쓴다 (PLAN_P2 §7, STAGES T3) | 명목 기준일 | |
 
 ## 사용자가 정해야 하는 것 (단계별로 묻는다)
 
@@ -115,4 +123,7 @@
 | 2026-11-14 (7차 반영) | `s2_suspend_signal_check`: 미래 날짜 정지 토큰(제품·달·유형·날짜) 214개마다 확인 스냅샷, `confirm_status`(confirmed / not_confirmed / unconfirmable / censored), `reason`(ended_before_check / product_absent / stay / token_gone). stay = 확인 스냅샷에 집행정지(R4) 토큰 | S3 signal_outcome의 근거 | |
 | 2026-11-14 (8차 반영) | 정지 비고가 확인됐지만 정지일이 다른 신호는 `realized_partial`(`confirmed_other_date`, `date_gap_days`). SUSPEND 이벤트 날짜는 확인 스냅샷 비고의 정지일이다 (신호 날짜를 쓰지 않음). `state_eom`은 늦게 보인 정지일 규칙으로 이미 그 날짜를 쓴다 (2022-09 39개 제품: 9/8 예고 → 9/9 정지, 9월 `exposure_frac` 8/30) | 확인된 것은 비고의 날짜. 신호 날짜는 하루 다름 | 신호 날짜 사용 |
 | 2026-11-14 (8차 반영) | `s2_suspend_signal_check`의 판정 우선순위: censored → confirmed(같은 토큰) → confirmed_other_date(정지 비고 있음) → unverifiable → not_confirmed(delisted → stay → note_gone) | 확인 스냅샷에 정지 비고와 집행정지 비고가 함께 있으면 정지가 확인된 것 (2022-09 4개 제품) | stay 우선 |
+| 2026-11-14 (9차 반영) | 외부 근거는 `config/external_evidence.yaml`(조건: 신호 달·유형·날짜, 기대 건수 23)로 둔다. 맞는 건수가 다르면 멈춘다. 링크 내용은 수집하지 않는다 (CLAUDE.md 외부 수집 금지) | 재현성, 조건이 데이터와 어긋나면 알 수 있게 | 제품코드 23개 나열 |
+| 2026-11-14 (9차 반영) | `s2_suspend_signal_check`에 `signal_type`, `source_rule`, `outcome`(realized / realized_partial / not_realized / unverifiable / censored), `date_gap_days`(확인된 비고 날짜 − 예고 날짜, 부호 있음), `event_effective_date`·`event_date_source`, `reason_source`, `evidence`를 둔다. 확인 스냅샷(신호 날짜 이후 첫 스냅샷) 기준이며 S3 `signal_outcome`으로 옮긴다 | | |
+| 2026-11-14 (9차 반영) | `snapshot_inventory.filename_revision_date`: 원본 파일명의 수정일(`_1.21.수정`). 판정에 쓰지 않는다 (보고·한계용). 연도는 기준일의 연도, 수정일 달이 기준일 달보다 6 넘게 크면 전년 | 명목 기준일 뒤 정보를 데이터로 찾는 근거 | |
 

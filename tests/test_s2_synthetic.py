@@ -302,7 +302,7 @@ def test_substitute_only_row_has_no_state_row(con):
 
 
 def test_suspend_signal_check_classes(con):
-    got = {r[0]: r[1:] for r in con.execute("""select product_code, confirm_status, reason, date_gap_days
+    got = {r[0]: r[1:4] for r in con.execute("""select product_code, confirm_status, reason, date_gap_days
         from s2_suspend_signal_check""").fetchall()}
     assert got["600000050"] == ("confirmed", None, None)
     assert got["600000300"] == ("confirmed_other_date", None, 1)
@@ -316,4 +316,15 @@ def test_suspend_signal_check_classes(con):
 def test_stay_flag_comment(con):
     c = con.execute("""select comment from duckdb_columns() where table_name = 'product_state_month' and column_name = 'stay_flag'""").fetchone()[0]
     assert c.startswith("기준일 시점 값")
+
+
+def test_suspend_signal_outcome_and_event_date(con):
+    """outcome과 이벤트 유효일: 같은 날짜 → 신호 날짜, 다른 날짜 → 확인된 비고의 날짜 (예고 날짜는 쓰지 않음)"""
+    got = {r[0]: r[1:] for r in con.execute("""select product_code, signal_type, source_rule, outcome, event_effective_date,
+               event_date_source, reason_source from s2_suspend_signal_check""").fetchall()}
+    assert got["600000050"] == ("SUSPEND_SCHEDULED", "R3", "realized", D(2024, 2, 15), "signal_confirmed", None)
+    assert got["600000300"] == ("SUSPEND_SCHEDULED", "R3", "realized_partial", D(2024, 2, 16), "note_benefit", None)
+    assert got["600000310"] == ("SUSPEND_SCHEDULED", "R3", "not_realized", None, None, "data")
+    assert got["600000330"] == ("SUSPEND_SCHEDULED", "R3b", "unverifiable", None, None, None)
+    assert got["600000340"][2:] == ("censored", None, None, None)
 

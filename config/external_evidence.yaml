@@ -1,0 +1,23 @@
+# 데이터가 아닌 외부 자료로 정한 사유 (사용자 결정 2026-11-14 9차). 크롤링하지 않는다: 링크는 사용자가 준 것이다.
+# s2_suspend_signal_check에서 조건에 맞는 신호의 reason을 덮어쓰고 reason_source = external, evidence = 링크로 둔다.
+# 조건에 맞는 건수가 expected_count와 다르면 멈춘다.
+suspend_signal:
+  - id: kyongbo_2025_06
+    match: {signal_month: "2025-06", token_type: "R3", token_date: "2025-06-24"}
+    expected_count: 23
+    reason: stay
+    note: "(주)경보제약 23개 제품. 2025-06-18 잠정 집행정지, 2025-07-09 본 집행정지 인용, 복지부 급여중지 안내와 유예 (외부 보도)"
+    evidence:
+      - https://dailypharm.com/user/news/4876
+      - https://dailypharm.com/user/news/4216
+      - https://www.medigatenews.com/news/1252800688
+  - id: donga_2022_05
+    match: {signal_month: "2022-05", token_type: "R3b", token_date: "2022-08-01"}
+    expected_count: 72
+    reason: stay
+    reason_source: data+external      # 데이터: 이후 스냅샷의 집행정지 비고 / 외부: 아래 기사
+    keep_data_evidence: true
+    note: "동아에스티(주) 72개 제품. 같은 칸의 집행정지(22.5.3.)는 122개 품목 약가인하에 대한 것이고 8월 급여정지에 대한 것이 아니다 (사용자 확인). 급여정지에 대한 집행정지: 5/10 잠정, 6/3 연장(12/2까지), 12/1 재연장 (외부 보도)"
+    evidence:
+      - https://dailypharm.com/user/news/39450
+      - https://www.dailypharm.com/user/news/33781

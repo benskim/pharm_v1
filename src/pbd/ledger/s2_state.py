@@ -23,7 +23,7 @@ from collections import defaultdict
 
 import pandas as pd
 
-from pbd.common import AUDIT, ROOT, connect
+from pbd.common import AUDIT, ROOT, connect, load_yaml
 from pbd.ledger.s1_load import write_csv
 from pbd.ledger.state_rules import Tok, derive
 
@@ -246,9 +246,14 @@ def build_signal_checks(con) -> None:
                           exists (select 1 from note_token t where t.product_code = j.product_code and t.list_month = j.check_month
                                   and t.token_type = j.token_type and t.token_date = j.token_date
                                   and t.token_date_end is not distinct from j.token_date_end) token_in_check,
-                          (select min(abs(datediff('day', j.token_date, t.token_date))) from note_token t
-                           where t.product_code = j.product_code and t.list_month = j.check_month
+                          (select arg_min(datediff('day', j.token_date, t.token_date), abs(datediff('day', j.token_date, t.token_date)))
+                           from note_token t where t.product_code = j.product_code and t.list_month = j.check_month
                              and t.token_type in ('R3', 'R3b')) susp_gap_in_check,
+                          (select arg_min(t.token_date, abs(datediff('day', j.token_date, t.token_date)))
+                           from note_token t where t.product_code = j.product_code and t.list_month = j.check_month
+                             and t.token_type in ('R3', 'R3b')) susp_date_in_check,
+                          (select min(t.source_list) from note_token t where t.product_code = j.product_code and t.list_month = j.check_month
+                             and t.token_type in ('R3', 'R3b')) susp_list_in_check,
                           (select string_agg(distinct t.raw, ' ; ') from note_token t where t.product_code = j.product_code
                              and t.list_month = j.check_month and t.token_type in ('R3', 'R3b')) susp_raw_in_check,
                           exists (select 1 from stg_benefit b where b.product_code = j.product_code and b.list_month = j.check_month
@@ -258,7 +263,7 @@ def build_signal_checks(con) -> None:
                           exists (select 1 from note_token t where t.product_code = j.product_code and t.list_month = j.signal_month
                                   and t.token_type = 'R4') stay_in_signal_month
                    from j left join cal c on c.list_month = j.check_month)
-        select *,
+        select 'SUSPEND_SCHEDULED' signal_type, token_type source_rule, *,
                case when check_month is null then 'censored'
                     when token_in_check then 'confirmed'
                     when susp_gap_in_check is not null then 'confirmed_other_date'
@@ -270,13 +275,49 @@ def build_signal_checks(con) -> None:
                     when not product_in_check then 'delisted'
                     when stay_in_check then 'stay' else 'note_gone' end reason
         from k order by signal_month, product_code, token_type, token_date""")
+    # 확인 스냅샷 기준 outcome (S3 signal_outcome으로 옮긴다)과 이벤트 유효일. 예고 날짜는 실현(같은 날짜)일 때만 쓴다
+    con.execute("""create or replace table s2_suspend_signal_check as select *,
+            case confirm_status when 'confirmed' then 'realized' when 'confirmed_other_date' then 'realized_partial'
+                 when 'not_confirmed' then 'not_realized' else confirm_status end outcome,
+            case when confirm_status = 'confirmed' then token_date
+                 when confirm_status = 'confirmed_other_date' then susp_date_in_check end event_effective_date,
+            case when confirm_status = 'confirmed' then 'signal_confirmed'
+                 when confirm_status = 'confirmed_other_date' then 'note_' || susp_list_in_check end event_date_source,
+            case when reason is not null then 'data' end reason_source,
+            case when confirm_status in ('confirmed', 'confirmed_other_date') then check_month || ' ' || susp_raw_in_check
+                 when reason = 'stay' then check_month || ' 집행정지 비고, 정지 비고 없음'
+                 when reason = 'delisted' then check_month || ' 급여목록에 제품 없음'
+                 when reason = 'note_gone' then check_month || ' 제품 있음, 정지·집행정지 비고 없음' end evidence
+        from s2_suspend_signal_check""")
+    apply_external_evidence(con)
+
+
+def apply_external_evidence(con) -> None:
+    """config/external_evidence.yaml: 외부 자료로 정하거나 확인한 사유 (사용자 결정 9·10차).
+    reason_source = external(외부 자료로만) / data+external(데이터와 외부 자료). keep_data_evidence면 데이터 근거 뒤에 링크를 붙인다."""
+    path = ROOT / "config/external_evidence.yaml"
+    if not path.exists():
+        return
+    for e in load_yaml("external_evidence.yaml").get("suspend_signal", []):
+        m = e["match"]
+        cond = "signal_month = ? and token_type = ? and token_date = cast(? as date) and outcome = 'not_realized'"
+        args = [m["signal_month"], m["token_type"], m["token_date"]]
+        n = con.execute(f"select count(*) from s2_suspend_signal_check where {cond}", args).fetchone()[0]
+        if n == 0:
+            continue                                    # 합성 데이터 등 대상이 없는 실행
+        assert n == e["expected_count"], (e["id"], n, e["expected_count"])
+        src = e.get("reason_source", "external")
+        ext = e["note"] + " | " + " ; ".join(e["evidence"])
+        ev = "'데이터: ' || evidence || ' / 외부: ' || ?" if e.get("keep_data_evidence") else "?"
+        con.execute(f"""update s2_suspend_signal_check set reason = ?, reason_source = ?, evidence = {ev}
+                        where {cond}""", [e["reason"], src, ext, *args])
 
 
 COMMENTS = {
-    "state_asof": "스냅샷 기준일 시점의 상태. 그 스냅샷까지의 정보만 쓴다 (뒤의 스냅샷을 지워도 같다)",
+    "state_asof": "명목 기준일 기준: 스냅샷 기준일(파일명의 명목 날짜) 시점의 상태. 그 스냅샷까지의 정보만 쓴다 (뒤의 스냅샷을 지워도 같다). 스냅샷 자체에 명목 기준일 뒤의 정보가 들어 있을 수 있다",
     "state_eom": "월말 상태. 이후 스냅샷으로 확인된 것(미래 신호 확인, 2개월 공백 복귀, 늦게 보인 지난 날짜)만 반영",
     "exposure_frac": "그 달 급여된 일수 / 그 달 일수. state_eom 기준",
-    "stay_flag": "기준일 시점 값: 그 달 비고에 집행정지(R4)가 있고 기준일 이전 해제(R5)가 없음. 늦게 보인 R4·R5 날짜로 고쳐 쓰지 않는다 (날짜는 S3 이벤트 유효일)",
+    "stay_flag": "기준일 시점 값(명목 기준일 기준): 그 달 비고에 집행정지(R4)가 있고 명목 기준일 이전 해제(R5)가 없음. 늦게 보인 R4·R5 날짜로 고쳐 쓰지 않는다 (날짜는 S3 이벤트 유효일)",
     "late_note_revised": "다음 스냅샷에서 처음 보인 지난 날짜(R6 해제일·R3 정지일·R3b 시작일, 이 달 안)로 state_eom·exposure_frac을 고쳐 씀",
     "product_role": "그 달 관측: 대체조제 행의 역할, 목록에 없으면 오렌지북 공고대조약",
     "product_role_carried": "그 달 대체조제 값, 없으면 과거 달 대체조제 값(앞으로만 이어 씀), 없으면 오렌지북 공고대조약",
@@ -286,7 +327,8 @@ COMMENTS = {
 
 def comment_columns(con) -> None:
     for col, text in COMMENTS.items():
-        con.execute(f"comment on column product_state_month.{col} is '{text}'")
+        esc = text.replace("'", "''")
+        con.execute(f"comment on column product_state_month.{col} is '{esc}'")
 
 
 # ---------------------------------------------------------------- 보고용 표
@@ -340,6 +382,17 @@ def write_tables(con) -> None:
                           or prev_equiv is distinct from sub_equiv)
         order by 1, 2""")
     dump("suspend_signal_check", """select * from s2_suspend_signal_check""")
+    dump("suspend_signal_outcome_by_source", """select source_rule, outcome, coalesce(reason, '-') reason, coalesce(reason_source, '-') reason_source,
+               count(*) n, min(date_gap_days) min_gap, max(date_gap_days) max_gap
+        from s2_suspend_signal_check group by all order by 1, 2, 3, 4""")
+    # 명목 기준일 뒤의 정보 (판정은 바꾸지 않는다. 보고용)
+    dump("post_base_info_by_month", """with t as (select n.source_list, n.list_month, n.base_date, i.filename_revision_date rev, n.token_type, n.token_date, n.product_code, n.raw
+                   from note_token n join snapshot_inventory i using (source_list, list_month) where n.is_future)
+        select source_list, list_month, base_date, rev filename_revision_date, token_type, count(*) n,
+               count(*) filter (where rev is not null and token_date <= rev) n_on_or_before_revision,
+               min(token_date) min_date, max(token_date) max_date,
+               list(product_code || ' ' || raw order by product_code)[1:3] examples
+        from t group by all order by 1, 2, 5""")
     dump("suspend_signal_unconfirmed_by_reason", """select token_type, substr(signal_month, 1, 4) as year, confirm_status,
                coalesce(reason, '-') reason, count(*) n, count(*) filter (where stay_in_signal_month) stay_in_signal_month,
                min(date_gap_days) min_gap_days, max(date_gap_days) max_gap_days,
