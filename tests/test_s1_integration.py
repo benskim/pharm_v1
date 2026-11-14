@@ -156,3 +156,13 @@ def test_diff_direction_matches_raw_filename(con):
     got = dict(con.execute("""select list_month, diff_direction from snapshot_inventory
                               where source_list = 'benefit' and n_rows_in_filename is not null""").fetchall())
     assert got == want
+
+
+def test_diff_unexplained_after_original_check(con):
+    """원본 대조 뒤 남은 차이 = 2022-01 6, 2022-03 2 (docs/LIMITATIONS.md L1, 사용자 결정 2026-11-14).
+    2023-11의 3은 고유 연번 수로 설명 (n_explained_other)."""
+    got = dict(con.execute("""select list_month, diff_unexplained from snapshot_inventory
+                              where source_list = 'benefit' and diff_unexplained <> 0""").fetchall())
+    assert got == {"2022-01": 6, "2022-03": 2}
+    assert con.execute("""select n_explained_other from snapshot_inventory
+                          where source_list = 'benefit' and list_month = '2023-11'""").fetchone()[0] == 3

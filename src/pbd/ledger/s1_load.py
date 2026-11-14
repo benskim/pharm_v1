@@ -194,6 +194,11 @@ def build_usage_obs(con, start: str, end: str) -> None:
 
 
 # ---------------------------------------------------------------- 보유표
+# 원본 대조로 설명된 파일명 건수 차이 (사용자 결정 2026-11-14). 다른 달로 일반화하지 않는다.
+#   ('benefit', '2023-11'): 파일명 건수 = 원본 제품 행의 고유 연번 수 (같은 연번의 제품 행 3쌍) → 중복 연번 수만큼 설명
+EXPLAINED_ROWNO_DUP = {("benefit", "2023-11")}
+
+
 def build_snapshot_inventory(con, files: dict, start: str, end: str) -> None:
     pieces = []
     for lst, paths in files.items():
@@ -206,7 +211,9 @@ def build_snapshot_inventory(con, files: dict, start: str, end: str) -> None:
     agg = """count(*) n_rows, count(distinct product_code) n_products,
                  count(*) filter (where regexp_full_match(product_code_raw, '[0-9]{8}')) n_code_padded,
                  count(*) filter (where row_kind = 'non_product') n_non_product,
-                 count(note) n_note_rows, count(*) filter (where price is null) n_price_null"""
+                 count(note) n_note_rows, count(*) filter (where price is null) n_price_null,
+                 count(*) - count(distinct row_no) n_rowno_dup"""
+    ex = ", ".join(f"('{a}', '{b}')" for a, b in sorted(EXPLAINED_ROWNO_DUP)) or "(null, null)"
     con.execute(f"""create or replace table snapshot_inventory as
         with cal as (select strftime(d, '%Y-%m') list_month from range(cast('{start}-01' as date), cast('{end}-01' as date) + interval 1 month, interval 1 month) t(d)),
         lists as (select unnest(['benefit', 'substitute']) source_list),
@@ -219,11 +226,12 @@ def build_snapshot_inventory(con, files: dict, start: str, end: str) -> None:
         fr as (select source_list, list_month, count(distinct product_code) n_future_listing
                from note_token where token_type = 'R1' and is_future group by 1, 2)
         select lists.source_list, cal.list_month, s.list_month is null as missing, s.base_date, s.n_base_dates, s.source_file,
-               coalesce(s.n_rows, 0) n_rows, s.n_products, s.n_code_padded, s.n_non_product, s.n_note_rows, s.n_price_null,
+               coalesce(s.n_rows, 0) n_rows, s.n_products, s.n_code_padded, s.n_non_product, s.n_note_rows, s.n_price_null, s.n_rowno_dup,
                try_cast(replace(regexp_extract(s.source_file, '\\(([0-9,]+)\\)', 1), ',', '') as bigint) n_rows_in_filename,
                s.n_rows - n_rows_in_filename as diff_vs_filename,
                coalesce(fr.n_future_listing, 0) n_future_listing,
-               diff_vs_filename - coalesce(fr.n_future_listing, 0) - s.n_non_product as diff_unexplained,
+               case when (lists.source_list, cal.list_month) in ({ex}) then s.n_rowno_dup else 0 end n_explained_other,
+               diff_vs_filename - coalesce(fr.n_future_listing, 0) - s.n_non_product - n_explained_other as diff_unexplained,
                case when diff_vs_filename > 0 then 'rows_gt_filename' when diff_vs_filename < 0 then 'filename_gt_rows'
                     when diff_vs_filename = 0 then 'equal' end as diff_direction,
                (select list_sort(flatten(list(c.cols))) from inv_cols c where c.source_list = lists.source_list and c.list_month = cal.list_month) columns_nonblank
