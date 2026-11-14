@@ -1,0 +1,7 @@
+*.csv
+*\.pyc
+*\.pyd
+*.DS_Store
+*.parquet
+# 원본 데이터 (읽기 전용, 저장소에 올리지 않음)
+data/raw/

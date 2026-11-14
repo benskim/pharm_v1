@@ -1,0 +1,27 @@
+# 분석 파라미터. 바꾸면 docs/DECISIONS.md에 기록한다.
+seed: 20261114
+
+p1:
+  start_month: "2022-01"
+  end_month: "2025-12"
+  signal_followup_months: 3      # 신호 실현 추적 기간
+  sample_start: "2024-01"        # 회귀 시험 표본 구간
+  sample_end: "2025-12"
+  validation_sample_size: 60
+
+p2:
+  start_month: "2018-01"
+  end_month: "2025-12"
+  origin_start: "2023-01"
+  origin_end: "2025-09"
+  horizons: [1, 2, 3]
+  top_n: 200                     # 2022년 원외 청구수량 상위 성분 수
+  target: "claim_qty"            # 원외 청구수량. 보조: claim_cnt
+  covid_months: ["2020-01", "2021-12"]
+  flu_season_months: [11, 12, 1, 2, 3]
+  usage_publication_lag_months: [0, null]   # null 자리는 사용자가 정한다
+  quantiles: [0.5, 0.9]
+  order_sim:
+    review_period_months: 1
+    lead_time_months: 1
+    cost_ratios: [1, 3, 9]       # 결품 비용 / 재고 비용 (가정값)

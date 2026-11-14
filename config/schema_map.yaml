@@ -1,0 +1,57 @@
+# 원본 컬럼명 → 공통 컬럼명 대응표. S0에서 실제 파일을 보고 채운다.
+# 표본(2024~2025)에서 확인된 것만 적어 두었다. TODO는 S0 확인 대상.
+
+benefit:
+  product_code: [제품코드]
+  ingredient_code: [주성분코드]
+  ingredient_name: [주성분명]
+  product_name: [제품명]
+  firm: [업체명]
+  route: [투여]
+  class_code: [분류]
+  spec: [규격]
+  unit: [단위]
+  price: [상한금액, 상한금액표 금액]
+  rx_otc: [전일]
+  note: [비고]
+  prev_code: [목록정비전코드]
+  base_date: [기준일자]
+  source_file: [소스파일명]
+  # TODO: 2022~2023 파일의 컬럼 변형
+
+substitute:
+  product_code: [제품코드]
+  ingredient_code: [주성분코드]
+  group_code: ["①주성분 및 투여제형코드"]
+  item_code: ["②품목기준코드"]
+  rep_code: ["②대표코드"]
+  price: [상한금액]
+  note: ["비고(급여정지)"]
+  ref_drug: ["생동대조약 여부"]
+  bioeq: ["생동인정여부(공고번호)"]
+  base_date: [기준일자]
+  # TODO: 2022~2023 파일의 컬럼 변형
+
+usage_raw:            # 건보공단 사용통계 원본. 전부 S0에서 확인
+  month: [TODO]
+  ingredient_c4: [TODO]
+  age_band: [TODO]
+  sido: [TODO]
+  inst_type: [TODO]
+  in_out: [TODO]
+  claim_cnt: [TODO]
+  patient_cnt: [TODO]
+  claim_qty: [TODO]
+  claim_amt: [TODO]
+
+usage_sample:         # 사용자 가공본 fact_cmpn_stat (월 × 성분4 × 원내외)
+  month: [STD_YYYYMM]
+  ingredient_c4: [WK_COMPN_4]
+  in_out: [OUT_IN_HOS]
+  claim_cnt: [PRSCRPTN_TNDN_CNT]   # TODO: 원본 청구건수와 같은지 확인
+  claim_amt: [PRSCRPTN_AMT]
+  patient_cnt: [PATIENT_CNT]
+  claim_qty: [PRSCRPTN_TOT_USE]    # TODO: 원본 청구수량과 같은지 확인
+
+price_2026: {}        # TODO: 심평원 버전, 의약품안전나라 버전
+orangebook: {}        # TODO
