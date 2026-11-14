@@ -47,9 +47,14 @@
 | `PRICE_PENDING` | R2 가격 예고 | 신호 날짜 이후 첫 스냅샷의 금액 = 예고 금액 |
 | `LISTING_SCHEDULED` | R1 등재 예정 (처음 관측된 제품) | 신호 날짜 이후 첫 스냅샷에 제품이 있고 정지·삭제가 아님 |
 | `LISTING_NOTE_EXISTING` | R1 등재 예정 (이미 급여 중인 제품) | 상태 변화 없음. 실현율 계산에서 따로 보고 |
-| `STAY_RELEASE_PRICE` | R5 집행정지 해제 및 인하 | 해제 후 첫 스냅샷의 인하 여부 |
+| `STAY_RELEASE_PRICE` | R5 집행정지 해제 및 인하 (U6 변형 포함) | 해제 후 첫 스냅샷의 인하 여부. 이벤트 쌍(STAY_END + PRICE_CHANGE)은 확인 뒤에 만든다 |
+| `SUSPEND_SCHEDULED` | R3 급여정지의 미래 날짜, R3b 기간 명시 정지의 미래 시작일 | 신호 날짜 이후 첫 스냅샷에서 같은 제품이 급여정지(같은 정지일)로 확인됨. 확인되면 SUSPEND 이벤트 날짜 = 신호 날짜 (`signal_confirmed`), 시작 달의 `exposure_frac`을 고쳐 쓴다 (`NOTE_RULES.md` §2) |
+| `RESUME_SCHEDULED` | R3b 기간 명시 정지의 미래 종료일 | 종료일 이후 첫 스냅샷에 제품이 있고, 새 정지 비고나 삭제가 없음. RESUME 이벤트 날짜는 종료일 다음 날 (`note_benefit` / `note_substitute`) |
+| `DELISTING_SCHEDULED` | R9 급여삭제 예정 | 신호 날짜 이후 첫 스냅샷에서 제품이 사라짐. **F7 재분류(코드 교체·양도양수)를 먼저 거친다**. 1건이라 A1에서 건수로만 보고 |
 
 신호 날짜가 미래가 아닌 R2·R5 비고(이미 적용된 날짜)는 신호가 아니라 이벤트의 날짜 근거다.
+
+**두 목록의 중복 신호 (P4)**: 같은 제품·같은 유형·같은 신호 날짜가 급여목록과 대체조제 목록에 함께 나오면 신호 하나로 합치고 `source_list`에 두 목록을 모두 적는다. 실현율 분모는 합친 신호로 센다.
 
 **신호 결과** (`signal_outcome`)
 | outcome | 뜻 |
@@ -74,7 +79,8 @@ L1 정규화
 
 L2 원장
  ├ product_state_month  제품×월: state, price_listed, price_pending, pending_date, stay_flag,
- │                      exposure_frac, in_substitute_list, is_original (오렌지북)
+ │                      exposure_frac, exposure_revised, state_revised, resume_unconfirmed,
+ │                      in_substitute_list, product_role (reference / generic / NULL), role_source
  ├ product_attr_scd2    업체명·제품명·주성분코드의 유효 구간
  ├ bridge_product_item  제품코드 → 품목기준코드
  ├ bridge_code_recode   옛 제품코드 → 새 제품코드 (목록정비전코드)
@@ -94,13 +100,22 @@ L3 분석용
 |---|---|---|
 | `reimbursed` | 급여 적용 중 | 목록에 있고 아래에 해당하지 않음 |
 | `scheduled_listing` | 목록에 실렸지만 시행 전 | 처음 관측된 제품 + `LISTING_SCHEDULED` 신호의 날짜 전 |
-| `suspended` | 급여정지 | 급여정지 비고 날짜 이후 |
+| `suspended` | 급여정지 | 급여정지 비고 날짜 이후. 기간 명시 정지(R3b)는 비고 유무가 아니라 시작일~종료일로 판정 |
 | `unpriced` | 산정불가 | 비고 또는 금액 칸의 `산정불가` |
 | `delisted` | 삭제 | 다음 스냅샷에 없음 (코드 교체·양도양수 제외) |
 
 - 집행정지는 state가 아니라 `stay_flag`. 급여는 정상이다.
-- `scheduled_delisting`은 정의만 둔다. 표본에 미래 삭제일 비고가 0건이었다. 나오면 S0에서 보고한다.
-- 한 달 안에서 상태가 바뀌면 월말 상태를 `state`에, 급여된 일수 비율을 `exposure_frac`에 둔다.
+- `scheduled_delisting`은 state로 두지 않는다. 미래 삭제일 비고(R9, 전체 기간 1건)는 `DELISTING_SCHEDULED` 신호로만 기록한다.
+- 한 달 안에서 상태가 바뀌면 월말 상태를 `state`에, 급여된 일수 비율을 `exposure_frac`에 둔다. `SUSPEND_SCHEDULED`처럼 다음 스냅샷에서 확인된 뒤 고쳐 쓴 행은 `exposure_revised = true`.
+- 분석 창 시작(2022-01) 전에 시작된 집행정지는 STAY_START 이벤트를 만들지 않고 `stay_flag`만 켠다.
+- 종료일 없는 급여정지(R3)의 복귀: (a) R6 해제 비고, 또는 (b) 두 목록 어디에도 그 정지 토큰이 없는 달이 2개월 연속. (b)의 RESUME 유효일은 토큰이 처음 사라진 달의 1일(`snapshot_first`). 첫 달은 `suspended`를 유지하고, 둘째 달에 확정되면 첫 달 행을 고쳐 쓴다(`state_revised = true`). 한 달 공백 뒤 같은 정지일로 다시 나타나면 이벤트 없음. 분석 끝 한 달 공백은 `resume_unconfirmed = true` (`NOTE_RULES.md` R3).
+- **`is_original`은 쓰지 않는다** ("제네릭 표시 없음 = 오리지널"은 추정). 대신 `product_role`:
+  - `reference`: 대체조제 목록 `생동대조약 여부` = ○, 또는 오렌지북 `공고대조약` = O
+  - `generic`: 대체조제 목록 `생동인정여부` = ○, 또는 오렌지북 `제네릭의약품` = O
+  - NULL: 어느 쪽 근거도 없음 (연결 안 된 제품 포함)
+  - `role_source`: substitute / orangebook / both. 오렌지북 연결 경로는 1) `code_map`(제품코드 → 품목기준코드), 2) 대체조제 목록 `②품목기준코드`. 경로 2는 대체조제 목록 제품에만 있어 generic 쪽으로 치우친다.
+  - 두 근거가 충돌하는 제품(reference와 generic 근거가 함께 있음)은 S2에서 건수와 사례를 보고하고, 판정은 사용자가 정한다. S0 점검: 47개 (대체조제 안에서 대조약○·생동인정○ 32개, 대체조제 대조약○ vs 오렌지북 제네릭 15개).
+  - 한계: 대조약이 항상 오리지널은 아니다.
 
 ### event_type
 LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), SUSPEND, RESUME, STAY_START, STAY_END, TRANSFER (kind: same_item_recode / transfer_by_name / same_firm_swap / list_recode), ATTR_CHANGE.
@@ -127,7 +142,8 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 ## 5. 분석
 
 ### A. 신호의 실현율과 시차 (본론)
-- **A1 실현율 표**: 신호 유형 × 연도 × (오리지널/제네릭)별 신호 수, `realized` / `realized_partial` / `not_realized` / `censored` 건수와 비율. 실현율은 `censored`를 뺀 분모로 계산하고 Wilson 95% 구간을 붙인다.
+- **A1 실현율 표**: 신호 유형 × 연도별 신호 수, `realized` / `realized_partial` / `not_realized` / `censored` 건수와 비율. 실현율은 `censored`를 뺀 분모로 계산하고 Wilson 95% 구간을 붙인다. `DELISTING_SCHEDULED`(1건)는 실현율 없이 건수로만 보고한다.
+  - **보조 표**: `product_role` 분해 (`reference` / `generic` / 모름). 근거가 대체조제 목록 쪽으로 치우치므로 본 표에 넣지 않는다. 표 앞에 역할별 제품 수와 비율을 연도별·삭제 여부별로, 오렌지북 연결률을 경로별로 적는다. "대조약 = 오리지널"로 쓰지 않는다.
 - **A2 시차 분포**: 신호 발행 월 → 신호 날짜 → 실현 확인 스냅샷. 일수 분포와 "몇 번째 스냅샷에서 확인됐나".
 - **A3 실현되지 않은 신호**: 사유별 건수와 사례 표. 숨기지 않는다.
 - **A4 사용통계 검증**: 실현된 가격 신호에서 성분 원외 단가(청구금액 ÷ 청구수량)가 (a) 신호 날짜가 속한 달과 (b) 스냅샷 관측월 중 언제 움직였는지 비교한다. 월중 적용은 `exposure_frac`으로 부분 월 변화까지 맞는지 본다. 대상은 성분 내 제품의 절반 이상이 같은 신호를 가진 경우로 한정하고, 대상 수·제외 수(비공개로 빠진 성분 포함)를 먼저 보고한다.
@@ -143,7 +159,7 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 그룹(①주성분 및 투여제형코드 × 주성분코드)별 최저가·최고가·대조약 가격과 성분 원외 금액. 리포트에 순위표로 넣는다. 절감액은 계산하지 않는다.
 
 ### P2로 넘기는 것
-`market_month`의 신호 특징: 예고 인하 폭 × 해당 제품 비중 × 노출 일수 비율, 등재 예정 업체 수, 급여정지 제품 수, 신호 유형별 과거 실현율. **예측 시점에 볼 수 있던 스냅샷만으로** 만든다.
+`market_month`의 신호 특징: 예고 인하 폭 × 해당 제품 비중 × 노출 일수 비율, 등재 예정 업체 수, 급여정지 제품 수, 신호 유형별 과거 실현율. **예측 시점에 볼 수 있던 스냅샷만으로** 만든다. 나중에 고쳐 쓴 `exposure_frac`(`exposure_revised = true`)은 쓰지 않고, 예측 시점에 있던 `signal_ledger` 행만 쓴다.
 
 ## 6. 단계와 완료 기준
 
@@ -152,9 +168,9 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 | 단계 | 내용 | 완료 기준 |
 |---|---|---|
 | **S0** 자료 점검 (P1·P2 공통) | `data/raw/` 전수 조사 | `docs/DATA.md` §5의 6개 항목 보고. `python reference/precheck_v3.py data/sample` 출력이 `reference/precheck_v3_output.md`와 일치. Makefile 골격과 `config/schema_map.yaml` 초안. **구현 없이 점검만** |
-| **S1** 적재·비고 파서 | L1 테이블 | 비고가 있는 모든 행이 type을 가짐 (`unresolved` 포함, 건수 보고). R1~R7·P1~P3 문형 테스트 통과. `is_future` 판정 테스트. 표본 구간 유형별 행 수가 reference F2와 일치. 원본 행 수 = stg 행 수. stg_usage 재집계 = 가공본 (S0에서 확인한 범위) |
-| **S2** 상태·속성·연결 | `product_state_month`, `product_attr_scd2`, 두 bridge, 오렌지북 연결 | 제품×월 행 수 = 원본 행 수. 표본 구간 2025-11의 27행이 `scheduled_listing` 17 / `reimbursed` 10. 급여정지·집행정지 구간 수가 reference F5와 일치. 품목·오렌지북 연결률 보고 |
-| **S3** 신호·이벤트 원장 | `signal_ledger`, `signal_outcome`, `event_ledger`, 대조표 | 표본 구간에서 F4·F7 숫자 재현. 모든 신호가 outcome 하나를 가짐. 실현되지 않은 신호의 날짜가 이벤트에 쓰이지 않음(테스트). `event_id`·`signal_id` 결정적. 스냅샷을 한 달씩 추가한 결과 = 한 번에 만든 결과 |
+| **S1** 적재·비고 파서 | L1 테이블 | 비고가 있는 모든 행이 type을 가짐 (`unresolved` 포함, 건수 보고). R1~R7·R3b·R9·P1~P4 문형 테스트 통과 (U1~U9 변형 포함: U1→R4, U4·U5→R2, U6→R5, U9→R1, U2·U3·U8→R3b 시작일·종료일, U7→R9). `is_future` 판정 테스트 (기간 명시 정지는 시작일·종료일 각각). 표본 구간 유형별 행 수가 reference F2와 일치. 원본 행 수 = stg 행 수. stg_usage 재집계 = 가공본 (S0에서 확인한 범위) |
+| **S2** 상태·속성·연결 | `product_state_month`, `product_attr_scd2`, 두 bridge, 오렌지북 연결 | 제품×월 행 수 = 원본 행 수. 표본 구간 2025-11의 27행이 `scheduled_listing` 17 / `reimbursed` 10. 급여정지·집행정지 구간 수가 reference F5와 일치. 기간 명시 정지는 종료일 뒤 비고가 남아도 복귀 (합성 시험). 종료일 없는 정지의 복귀 규칙 합성 시험: 1개월 공백 후 재등장(이벤트 없음, 실데이터 3건 644914120·644914130·644914140 포함), 2개월 연속 공백(첫 달 고쳐 쓰기, RESUME 유효일 = 첫 공백 달 1일), 한 목록에만 남은 토큰(복귀 아님), 분석 끝 1개월 공백(`resume_unconfirmed`). 창 시작 전 집행정지는 `stay_flag`만 (합성 시험). 품목·오렌지북 연결률을 연도별·삭제 여부별·경로별로 보고. `product_role`·`role_source`, 역할별 제품 수(연도별·삭제 여부별), 근거 충돌 건수와 사례 보고 |
+| **S3** 신호·이벤트 원장 | `signal_ledger`, `signal_outcome`, `event_ledger`, 대조표 | 표본 구간에서 F4·F7 숫자 재현. 모든 신호가 outcome 하나를 가짐. 실현되지 않은 신호의 날짜가 이벤트에 쓰이지 않음(테스트). `event_id`·`signal_id` 결정적. 스냅샷을 한 달씩 추가한 결과 = 한 번에 만든 결과 (`exposure_frac`·복귀 첫 달 `state` 고쳐 쓰기 포함). 새 신호 3개 합성 시험: `SUSPEND_SCHEDULED` 확인/미확인, `RESUME_SCHEDULED` 실현/새 정지로 미실현, `DELISTING_SCHEDULED` 삭제/코드 교체(F7)로 미실현. U6: 신호 달에는 이벤트 없음, 다음 달 금액 확인 뒤 STAY_END+PRICE_CHANGE. 두 목록 중복 신호가 하나로 합쳐지고 분모가 한 번만 세짐 |
 | **S4** 분석 A | A1~A6 | A1 실현율 표(연도별, 구간 포함), A4 대상·제외 수 먼저. `outputs/validation/sample_60.csv` (라벨 비움). **사용자 라벨 후** 정밀도 계산 |
 | **S5** 분석 B·C | B1, B2, C 순위표 | 한계 절이 결과보다 먼저. 표본 탈락 단계표 |
 | **S6** 월간 리포트 | `make report MONTH=YYYY-MM` | 내용: 이번 달 신호(유형별, 과거 실현율 병기), 지난 신호의 결과, 급여정지, 삭제, 양도양수, 대체조제 그룹 순위. 같은 입력 → 같은 파일 해시. 스냅샷 없는 달은 "자료 없음". 대시보드용 CSV |

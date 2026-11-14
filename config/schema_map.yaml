@@ -1,36 +1,46 @@
 # 원본 컬럼명 → 공통 컬럼명 대응표. S0에서 실제 파일을 보고 채운다.
 # 표본(2024~2025)에서 확인된 것만 적어 두었다. TODO는 S0 확인 대상.
 
+# S0 (2026-11-14) 전체 기간 확인 결과
+# - 결측 자리표시: 문자열 '', 'nan', 'None' → NULL
+# - 실수로 저장된 코드: '645101520.0', 8806519003301.0 → '.0' 제거 후 문자열, 폭 맞춤
+# - 열 이름 목록은 우선순위 순서. 앞의 열이 NULL이면 다음 열을 쓴다 (coalesce)
+
+null_tokens: ["", "nan", "None", "NaN"]
+
 benefit:
-  product_code: [제품코드]
+  product_code: [제품코드]          # 2025-11·12에 8자리 → lpad 9
   ingredient_code: [주성분코드]
   ingredient_name: [주성분명]
   product_name: [제품명]
   firm: [업체명]
   route: [투여]
-  class_code: [분류]
+  class_code: [분류, 식약분류]      # 2022-11은 분류가 전부 NULL, 식약분류에 값 (2022-10 분류와 23,409/23,409 일치)
+  mfds_class: [식약분류]            # 2022-11, 2025-10에만 값. 2025-10은 분류와 22,236/22,258 일치 (확인 필요)
+  n_ingredients: [주성분개수]       # 2025-11·12에만
   spec: [규격]
   unit: [단위]
-  price: [상한금액, 상한금액표 금액]
+  price: [상한금액]                 # DOUBLE. '산정불가' 문자열은 parquet에서 NULL로 들어옴
   rx_otc: [전일]
   note: [비고]
-  prev_code: [목록정비전코드]
-  base_date: [기준일자]
+  prev_code: [목록정비전코드]       # 문자열 실수형 '645101520.0'. 2022-01~2024-12, 2025-09~10에 값
+  base_date: [기준일자]             # 'YYYY-MM-DD'. 1일이 아닌 달: 2023-04-08, 2023-09-05, 2025-03-04
   source_file: [소스파일명]
-  # TODO: 2022~2023 파일의 컬럼 변형
 
 substitute:
   product_code: [제품코드]
   ingredient_code: [주성분코드]
-  group_code: ["①주성분 및 투여제형코드"]
-  item_code: ["②품목기준코드"]
-  rep_code: ["②대표코드"]
+  group_code: ["①주성분 및 투여제형코드", "①주성분 및투여제형코드"]   # 2022-10만 띄어쓰기 없는 이름
+  item_code: ["②품목기준코드"]      # DOUBLE → bigint → 9자리 문자열
+  rep_code: ["②대표코드"]           # DOUBLE → bigint → 13자리 문자열
+  prev_code: [목록정비전코드]       # 2022~2023은 값 없음 ('None'/'nan')
   price: [상한금액]
   note: ["비고(급여정지)"]
-  ref_drug: ["생동대조약 여부"]
+  ref_drug: ["생동대조약 여부", "생동대조약여부"]               # 2022-01~12는 띄어쓰기 없는 이름
   bioeq: ["생동인정여부(공고번호)"]
-  base_date: [기준일자]
-  # TODO: 2022~2023 파일의 컬럼 변형
+  sort_order: [정렬순서]
+  base_date: [기준일자]             # 2025-03은 2025-03-01 (급여목록은 2025-03-04)
+  source_file: [소스파일명]
 
 usage_raw:            # 건보공단 사용통계 원본. 근거: data/raw/usage/cmpn_scheme(2025.2.4.).xlsx
   month: [STD_YYYYMM]
@@ -58,5 +68,24 @@ usage_sample:         # 사용자 가공본 fact_cmpn_stat (월 × 성분4 × �
   patient_cnt: [PATIENT_CNT]
   claim_qty: [PRSCRPTN_TOT_USE]    # TODO: 원본 청구수량과 같은지 확인
 
-price_2026: {}        # TODO: 심평원 버전, 의약품안전나라 버전
-orangebook: {}        # TODO
+price_2026:
+  code_map:           # data/raw/master/dim_drug_code_map_26.parquet (심평원 버전 = dim_drug_master_20260831)
+    product_code: ["제품코드(개정후)"]   # DOUBLE, 309,889행 중 65,588행만 값. 고유 22,496
+    item_code: [품목기준코드]
+    rep_code: [대표코드]
+    std_code: [표준코드]
+    generic_code: ["일반명코드(성분명코드)"]
+    atc: ["국제표준코드(ATC코드)"]
+    cancel_date: [취소일자]
+    transfer_date: ["양도양수적용(공고)일자"]
+  drug_info:          # data/raw/master/dim_drug_info_26.parquet (의약품안전나라 버전 = dim_drug_info)
+    item_code: [품목기준코드]          # 고유, 42,714행
+    product_name: [제품명]
+    firm: [업체명]
+    cancel: ["취소/취하"]
+    cancel_date: ["취소/취하일자"]
+    atc: [ATC코드]
+orangebook:           # data/raw/orangebook/dim_orange_book.parquet (= dim_generic_master)
+  item_code: [기준코드]                # 품목기준코드로 연결. 23,518행, 고유 19,630
+  generic_flag: [제네릭의약품]         # 'O' / NULL
+  ref_drug_flag: [공고대조약]          # 'O' / NULL

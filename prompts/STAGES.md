@@ -30,16 +30,17 @@ CLAUDE.md, docs/DATA.md, docs/PLAN_P1.md, docs/PLAN_P2.md, docs/NOTE_RULES.md, d
 reports/S0_result.md와 내가 단 답을 읽고 P1 S1만 수행해. 설계는 docs/PLAN_P1.md §4, 완료 기준은 §6의 S1.
 - L1 테이블: snapshot_inventory, stg_benefit, stg_substitute, stg_usage(원본 단위, observed 포함), note_token(is_future 포함), attr_2026.
 - 테스트를 먼저 쓴다. 기대값은 docs/NOTE_RULES.md의 문형 예시와 reference 출력에서 가져오고 구현 출력으로 만들지 않는다.
-- is_future는 스냅샷의 실제 기준일과 비교한다 (2025-03-04 같은 달 포함 테스트).
+- is_future는 스냅샷의 실제 기준일과 비교한다 (2025-03-04 같은 달 포함 테스트). 기간 명시 정지(R3b)는 시작일·종료일을 각각 판정한다.
+- S0에서 정한 변형 문형 테스트: U1→R4, U4·U5(괄호)→R2, U6→R5, U9(신설)→R1, U2·U3·U8→R3b, U7→R9.
 - make check-sample로 표본 구간 숫자를 reference와 비교한다.
 ```
 
 ### S2 상태·속성·연결
 ```
-P1 S2만 수행해. product_state_month, product_attr_scd2, bridge_product_item, bridge_code_recode, 오렌지북 연결(is_original).
+P1 S2만 수행해. product_state_month, product_attr_scd2, bridge_product_item, bridge_code_recode, 오렌지북 연결과 product_role(reference / generic / NULL, role_source).
 - 상태 판정은 docs/PLAN_P1.md §4의 state 표.
-- 합성 스냅샷 테스트: 등재 예정(처음 관측 / 기존 제품), 월중 급여정지, 정지 중 삭제, 집행정지 중 가격 변화, 산정불가의 두 위치.
-- 완료 기준은 §6의 S2. 연결률을 연도별로 보고한다.
+- 합성 스냅샷 테스트: 등재 예정(처음 관측 / 기존 제품), 월중 급여정지, 정지 중 삭제, 집행정지 중 가격 변화, 산정불가의 두 위치, 기간 명시 정지(종료일 뒤 비고가 남아도 복귀), 종료일 없는 정지의 복귀(1개월 공백 후 재등장 = 이벤트 없음 / 두 목록 모두 2개월 연속 공백 = 복귀, 첫 달 고쳐 쓰기 / 분석 끝 1개월 공백 = 미확정), 창 시작 전 집행정지(stay_flag만, STAY_START 없음).
+- 완료 기준은 §6의 S2. 연결률을 연도별·삭제 여부별·경로별(code_map / ②품목기준코드)로 보고한다. is_original은 쓰지 않는다. product_role 역할별 제품 수(연도별·삭제 여부별)와 근거 충돌 건수·사례를 보고한다.
 ```
 
 ### S3 신호·이벤트 원장
@@ -48,7 +49,9 @@ P1 S3만 수행해. signal_ledger, signal_outcome, event_ledger, 스냅샷 차�
 - 신호와 이벤트는 따로 기록한다. 신호만으로 이벤트를 만들지 않는다 (CLAUDE.md 핵심 원칙).
 - 유효일 규칙은 §4. 실현되지 않은 신호의 날짜가 어떤 이벤트에도 쓰이지 않는지 테스트한다.
 - 합성 테스트: 예고 후 실현 / 예고 후 금액 다름 / 예고 후 비고 사라지고 가격 유지 / 예고 후 삭제 / 분석 끝 censored.
-- 진입·퇴출 재분류는 §4의 7단계 순서. 증분 시험: 한 달씩 추가한 결과 = 한 번에 만든 결과.
+- 새 신호 유형 합성 테스트: SUSPEND_SCHEDULED 확인·미확인(exposure_frac 고쳐 쓰기와 exposure_revised), RESUME_SCHEDULED 실현·새 정지로 미실현, DELISTING_SCHEDULED 삭제·코드 교체(F7)로 미실현, U6 신호 달에는 이벤트 없음 → 다음 달 금액 확인 뒤 STAY_END+PRICE_CHANGE.
+- 두 목록 중복 신호(P4)가 하나로 합쳐지고 실현율 분모가 한 번만 세지는지 테스트한다.
+- 진입·퇴출 재분류는 §4의 7단계 순서. 증분 시험: 한 달씩 추가한 결과 = 한 번에 만든 결과 (exposure_frac·복귀 첫 달 state 고쳐 쓰기 포함).
 - reports/P1_S3_result.md에 연도별 대조표와 신호 유형별 outcome 건수를 넣는다.
 ```
 
@@ -100,6 +103,7 @@ usage_publication_lag_months를 0과 내가 정한 값 두 가지로 돌린다. 
 ```
 P2 T3만 수행해. P1 S3의 signal_ledger가 있어야 한다. M2, M3.
 - 신호 특징은 origin 시점에 기준일이 지난 스냅샷만으로 만든다. origin 이후 스냅샷을 지워도 특징이 같은지 테스트한다.
+- 나중에 고쳐 쓴 exposure_frac(exposure_revised)을 특징에 쓰지 않는다. origin 시점의 signal_ledger 행만 쓰는지 누수 테스트에 넣는다.
 - M3 대 M2는 origin 2023-01 이후에서만 비교한다. 검정 결과가 유의하지 않으면 "차이 없음"으로 쓴다.
 ```
 
