@@ -88,10 +88,7 @@ def build_signal_ledger(con) -> None:
                     when 'R9' then 'DELISTING_SCHEDULED' else 'SUSPEND_SCHEDULED' end signal_type,
                token_type source_rule, source_list, list_month, base_date, product_code, token_date signal_date,
                case when token_type = 'R3b' then token_date end period_start, token_date_end period_end, amount, raw, in_month_dated
-        from note_token n where is_future and token_type in ('R1', 'R2', 'R3', 'R3b', 'R5', 'R9')
-          -- 그 달 안 날짜이고 금액이 그 달 상한금액과 같은 가격 비고는 이미 적용된 가격: 신호로 만들지 않는다 (사용자 결정 2026-11-15)
-          and not (token_type = 'R2' and in_month_dated and amount = (select q.price_listed from product_state_month q
-                   where q.product_code = n.product_code and q.list_month = n.list_month))
+        from note_token where is_future and token_type in ('R1', 'R2', 'R3', 'R3b', 'R5', 'R9')
         union all
         select 'RESUME_SCHEDULED', 'R3b', source_list, list_month, base_date, product_code, token_date_end,
                token_date, token_date_end, null, raw, in_month_dated
@@ -370,9 +367,8 @@ def build_event_ledger(con) -> None:
         stay_end as (select product_code, observed_month from ev_stay where event_type = 'STAY_END'),
         ps as (select product_code, check_month, signal_id, signal_date, outcome from signal_outcome
                where signal_type = 'PRICE_PENDING' and outcome in ('realized', 'realized_partial')),
-        -- 가격 비고 날짜 근거: 기준일 이전 날짜, 또는 그 달 안 날짜(금액이 그 달 상한금액과 같은 것만 아래 np에서 쓴다, 사용자 결정 2026-11-15)
         r2p as (select t.product_code, t.list_month, t.token_date d, t.amount, t.in_benefit b from _tok t
-                where t.token_type = 'R2' and (not t.is_future or strftime(t.token_date, '%Y-%m') = t.list_month)),
+                where t.token_type = 'R2' and not t.is_future),
         ev_price(event_type, product_code, observed_month, kind, effective_date, date_source, signal_id, lo, hi, evidence) as (
             select 'PRICE_CHANGE', r.product_code, r.list_month,
                    case when se.product_code is not null then 'stay_released' when ps.signal_id is not null then 'signaled' else 'unsignaled' end,
