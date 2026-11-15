@@ -315,6 +315,22 @@ def build_sample(con, n_total: int = 60, seed: int | None = None, frozen: pd.Dat
     return out
 
 
+# 고정 표본에 더한 기록 (DECISIONS 2026-11-15): 층, 고른 규칙 = 층 안에서 이미 뽑힌 기록을 빼고 md5(seed || record_id)가 가장 작은 것
+EXTRA_DRAWS = [{"sample_id": 61, "stratum": "SUSPEND_SCHEDULED|not_realized|stay"}]
+
+
+def extra_draw(con, stratum: str, exclude: set[str], seed: int | None = None) -> str:
+    """층에서 고정 시드로 1건. build_sample의 층 안 순서(md5(seed || id))와 같은 규칙"""
+    seed = PARAMS["seed"] if seed is None else seed
+    con.execute("""create or replace temp table _cand2 as
+        select event_id record_id, event_type || '|' || kind || '|' || date_source stratum from event_ledger
+        union all select signal_id, signal_type || '|' || outcome || '|' || coalesce(reason, '-') from signal_outcome""")
+    ids = [r[0] for r in con.execute(f"select record_id from _cand2 where stratum = ? order by md5('{seed}' || record_id)", [stratum]).fetchall()]
+    ids = [i for i in ids if i not in exclude]
+    assert ids, f"층 {stratum}에 뽑을 기록이 없다"
+    return ids[0]
+
+
 def write_all(con) -> dict[str, pd.DataFrame]:
     OUT.mkdir(parents=True, exist_ok=True)
     tabs = build_a1(con)
@@ -333,12 +349,17 @@ def write_all(con) -> dict[str, pd.DataFrame]:
         labs = [c for c in LABEL_COLS if c in old.columns]
         if labs and old[labs].notna().any().any():
             # 같은 기록으로 고정해 다시 채우고 라벨을 옮겨 붙인다. 원장 주장이 바뀐 행은 claim_changed (다시 판정)
-            sample = build_sample(con, frozen=old[["sample_id", "record_id"]])
+            fr = old[["sample_id", "record_id"]].copy()
+            for x in EXTRA_DRAWS:                    # 고정 표본에 더하는 기록 (이미 있으면 그대로)
+                if str(x["sample_id"]) not in set(fr["sample_id"]):
+                    rid = extra_draw(con, x["stratum"], set(fr["record_id"]))
+                    fr = pd.concat([fr, pd.DataFrame([{"sample_id": str(x["sample_id"]), "record_id": rid}])], ignore_index=True)
+            sample = build_sample(con, frozen=fr)
             keep = old.set_index("record_id")
             for c in LABEL_COLS:
                 if c in keep.columns:
                     sample[c] = sample["record_id"].map(keep[c]).fillna("")
-            sample["claim_changed"] = sample["record_id"].map(keep["ledger_claim"]) != sample["ledger_claim"]
+            sample["claim_changed"] = sample["record_id"].map(keep["ledger_claim"]).fillna("(새 기록)") != sample["ledger_claim"]
             target = VAL / "sample_60.new.csv"
             print(f"sample_60.csv에 라벨이 있어 같은 기록으로 다시 채워 {target.name}에 썼다 (원장 주장이 바뀐 행 {int(sample['claim_changed'].sum())})")
     if sample is None:

@@ -152,9 +152,9 @@ def build_note_token(con) -> None:
         select s.source_list, s.list_month, s.base_date, s.product_code, p.seq, p.part, p.token_type, p.variant,
                p.token_date, p.token_date_end, p.amount, p.raw, s.note as note_raw,
                p.token_date > s.base_date as is_future, p.token_date_end > s.base_date as is_future_end,
-               -- 날짜가 그 달 2일~말일: 월중 수정으로 나중에 들어왔을 수 있다 (판정에 쓰지 않음, P2 누수 민감도용)
+               -- 날짜가 그 달 2일~말일 (날짜 조건일 뿐 수정의 증거가 아니다. 판정에 쓰지 않음, P2 민감도용, 사용자 결정 2026-11-15)
                coalesce((strftime(p.token_date, '%Y-%m') = s.list_month and day(p.token_date) >= 2)
-                        or (strftime(p.token_date_end, '%Y-%m') = s.list_month and day(p.token_date_end) >= 2), false) as possibly_revised,
+                        or (strftime(p.token_date_end, '%Y-%m') = s.list_month and day(p.token_date_end) >= 2), false) as in_month_dated,
                s.src_file, s.src_row
         from s join note_parse p using (note)
         order by s.source_list, s.list_month, s.product_code, s.src_file, s.src_row, p.seq""")
@@ -211,7 +211,7 @@ S1_COMMENTS = {
     ("note_token", "base_date"): "적용 기준일: 그 달 1일 (snapshot_inventory.base_date와 같음)",
     ("note_token", "is_future"): "token_date > 그 달 1일 (적용 기준일 기준 판정)",
     ("note_token", "is_future_end"): "token_date_end > 그 달 1일 (R3b 종료일)",
-    ("note_token", "possibly_revised"): "토큰 날짜가 그 달 2일~말일: 월중 수정으로 나중에 들어왔을 수 있음. 판정에 쓰지 않고 P2 누수 민감도에만 쓴다",
+    ("note_token", "in_month_dated"): "토큰 날짜(시작일 또는 종료일)가 그 달 2일~말일. 날짜 조건일 뿐 수정의 증거가 아니다. 판정에 쓰지 않고 P2 민감도(이 토큰을 뺀 결과)에만 쓴다",
 }
 
 

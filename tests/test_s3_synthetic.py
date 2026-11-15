@@ -80,6 +80,8 @@ B_ROWS = (
     + rows("700000210", notes={"2024-01": "급여정지(24.02.01.~24.02.20)"})
     # 한 달 빠졌다 돌아옴 → 퇴출(exit_reversed) + reentry
     + rows("700000220", ["2024-01", "2024-02", "2024-04", "2024-05", "2024-06"])
+    # 그 달 파일에만 그 달 안 날짜의 가격 비고, 금액 = 그 달 상한금액 (이미 적용된 가격, 사용자 결정 2026-11-15)
+    + rows("700000230", notes={"2024-04": "24.4.10., 90원"}, prices={m: 90.0 for m in M[3:]})
 )
 S_ROWS = [subs("2024-02", "700000150", None)] + [subs(m, "700000010") for m in M]
 # 대체조제 비고에도 같은 예고 (P4). 비고(급여정지) 칸에 가격 예고는 드물지만 합치기 규칙 시험용
@@ -301,3 +303,11 @@ def test_notice_date_on_partial_price(con):
     r = con.execute("""select effective_date, notice_date from event_ledger where product_code = '700000030' and event_type = 'PRICE_CHANGE'""").fetchall()
     assert r == [(D(2024, 3, 1), D(2024, 2, 15))]      # 유효일은 관측월 1일, 예고 날짜는 참고 컬럼
 
+
+
+def test_in_month_applied_price_note(con):
+    """그 달 파일의 가격 비고에 그 달 안 날짜(4/10)가 있고 금액이 그 달 상한금액(90)과 같으면: 신호를 만들지 않고,
+    가격 변경은 kind 그대로(unsignaled), 유효일 = 비고 날짜, date_source = note_benefit (사용자 결정 2026-11-15)"""
+    assert sig(con, "700000230") == []
+    assert ev(con, "700000230", "PRICE_CHANGE") == [("2024-04", D(2024, 4, 10), "note_benefit", "unsignaled", False, None, None)]
+    assert con.execute("select in_month_dated from note_token where product_code = '700000230'").fetchall() == [(True,)]

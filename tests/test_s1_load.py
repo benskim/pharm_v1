@@ -66,7 +66,7 @@ def test_substitute_column_aliases(con, tmp_path):
 
 def test_note_token_is_future_uses_first_of_month(con, tmp_path):
     """적용 기준일 = 그 달 1일 (사용자 결정 2026-11-15). 원본 기준일자 2025-03-04는 base_date_raw로만 남는다.
-    3/3 가격 예고와 3/5 정지는 3/1 기준 미래. 둘 다 날짜가 그 달 2일~말일이라 possibly_revised"""
+    3/3 가격 예고와 3/5 정지는 3/1 기준 미래. 둘 다 날짜가 그 달 2일~말일이라 in_month_dated"""
     p = _parquet(tmp_path, "benefit.parquet", [
         dict(연번=1, 투여="내복", 분류=214, 주성분코드="101301ATB", 제품코드="642100010", 제품명="가", 업체명="A",
              규격="1", 단위="정", 상한금액=100.0, 전일="전문", 비고="25.3.3., 90원 / 급여정지(25.3.5.)",
@@ -78,7 +78,7 @@ def test_note_token_is_future_uses_first_of_month(con, tmp_path):
     L.build_stg_snapshot(con, "benefit", [p])
     L.create_empty_stg(con, "substitute")
     L.build_note_token(con)
-    got = con.execute("""select product_code, seq, token_type, token_date, is_future, token_date_end, is_future_end, amount, possibly_revised
+    got = con.execute("""select product_code, seq, token_type, token_date, is_future, token_date_end, is_future_end, amount, in_month_dated
                          from note_token order by product_code, seq""").fetchall()
     assert got == [
         ("642100010", 1, "R2", D(2025, 3, 3), True, None, None, 90, True),

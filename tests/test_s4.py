@@ -163,7 +163,7 @@ def test_a1_denominator_excludes_censored_unverifiable_moot(con):
 def test_sample_60(con):
     import pandas as pd
     s = pd.read_csv(ROOT / "outputs/validation/sample_60.csv", dtype=str)
-    assert len(s) == 60 and s["record_id"].is_unique
+    assert len(s) == 61 and s["record_id"].is_unique          # 고정 60 + 추가 1 (sample_id 61, DECISIONS 2026-11-15)
     assert (s["product_code"] == "654700150").any()
     # 라벨: 비어 있거나(처음 만든 표본) Y / N / 모름, labeler는 claude / user_reviewed, label_source는 raw / external
     assert s["label_type_correct"].fillna("").isin(["", "Y", "N", "모름"]).all()
@@ -204,6 +204,7 @@ def test_labeled_sample_not_overwritten(tmp_path, monkeypatch):
     for f in ("build_a2", "build_a2_buckets", "build_a2_snapshot_order", "build_a3"):
         monkeypatch.setattr(S4, f, lambda con: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(S4, "build_a4_with_sensitivity", lambda con: {})
+    monkeypatch.setattr(S4, "EXTRA_DRAWS", [])
     monkeypatch.setattr(S4, "build_sample", lambda con, frozen=None: pd.DataFrame(
         {"sample_id": [1], "record_id": ["r1"], "ledger_claim": ["new"], "label_type_correct": [""]}))
 
@@ -242,3 +243,17 @@ def test_a4_denominator_reimbursed_only(con):
         n_unpriced = con.execute("""select count(*) from product_state_month where c4 = ? and list_month = ? and state_asof = 'unpriced'""",
                                  [r.c4, issued]).fetchone()[0]
         assert n_unpriced > 0 and r.n_prod_sens - (0 if pd.isna(r.n_prod_main) else r.n_prod_main) == n_unpriced
+
+
+@db
+def test_extra_draw_deterministic(con):
+    """추가 추출: 같은 층·같은 제외 집합이면 같은 기록, 이미 뽑힌 기록은 고르지 않는다"""
+    from pbd.ledger import s4_analysis as S4
+    c = duckdb.connect(str(DB_PATH), read_only=True)
+    try:
+        a = S4.extra_draw(c, "SUSPEND_SCHEDULED|not_realized|stay", set())
+        b = S4.extra_draw(c, "SUSPEND_SCHEDULED|not_realized|stay", set())
+        x = S4.extra_draw(c, "SUSPEND_SCHEDULED|not_realized|stay", {a})
+    finally:
+        c.close()
+    assert a == b and x != a and a.startswith("SUSPEND_SCHEDULED:")

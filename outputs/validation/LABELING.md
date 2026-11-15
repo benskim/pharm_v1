@@ -69,5 +69,5 @@
 | sample | 1차 → 최종 | labeler / label_source | 근거 |
 |---|---|---|---|
 | 21 | Y/Y 유지 | user_reviewed / raw | 외부 확인(항소 포기로 집행정지 종료, 7/15 인하, Dailypharm 2022-07-18). signaled와 stay_released가 겹치면 규칙상 signaled. STAY_END:626700122:2022-07 있음 (누락 아님) |
-| 25, 44 | 날짜 모름 → Y | user_reviewed / external | 보건복지부 고시 제2025-187호(2025.11.20.), 대한병원협회 보험 제2025-423호, 시행일 2025.11.20. (`docs/evidence/kha_2025-423.pdf`) |
+| 25, 44 | 날짜 모름 → Y | user_reviewed / external | 보건복지부 고시 제2025-187호(2025.11.20.), 대한병원협회 보험 제2025-423호, 시행일 2025.11.20. (`docs/evidence/보험_제2025-423_1_고시.pdf`) |
 | 51 | 유형 모름 → Y | user_reviewed / raw | 원장 수정: 주장이 `not_realized / stay` → `not_realized / note_gone`. 외부 원인은 `reason_external` |
