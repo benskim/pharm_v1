@@ -6,7 +6,9 @@
   label_note          : 판정 근거
   labeler             : claude (1차 라벨) / user_reviewed (사용자가 검토한 행)
   claude_label_type_correct, claude_label_date_correct : 1차(claude) 라벨. 사용자가 검토하며 label_*를 고쳐도 남긴다
-출력: outputs/validation/precision.csv (전체, record_type별, 층별, date_source별) × scope(all / user_reviewed),
+  label_source        : raw (원본만으로 판정) / external (원본으로 판단할 수 없는 부분을 공식 고시·공지·보도로 판정)
+출력: outputs/validation/precision.csv (전체, record_type별, 층별, date_source별)
+      × scope(all = external_included / user_reviewed / raw_only),
       outputs/validation/label_review_diff.csv (1차 라벨과 검토 라벨이 다른 행), 화면 출력
 - 비가중 정밀도: Y / (Y + N). 모름과 빈칸은 분모에서 빼고 따로 센다.
 - 가중 정밀도: 층 크기(stratum_size)로 가중. 층 h의 라벨 행마다 가중치 N_h / n_h (n_h = 그 층의 Y·N 행 수).
@@ -84,6 +86,7 @@ def summarize(rows):
 
 
 LABELERS = {"claude", "user_reviewed"}
+SOURCES = {"raw", "external"}
 LABELS = ("label_type_correct", "label_date_correct")
 
 
@@ -130,9 +133,19 @@ def main(path=None):
         if badl:
             print(f"labeler가 claude / user_reviewed가 아닌 행: sample_id {', '.join(badl[:20])}")
             return 1
+    has_source = any("label_source" in r for r in rows)
+    if has_source:
+        bads = [r["sample_id"] for r in rows if (r.get("label_source") or "").strip() not in SOURCES]
+        if bads:
+            print(f"label_source가 raw / external이 아닌 행: sample_id {', '.join(bads[:20])}")
+            return 1
     scopes = [("all", rows)]
     if has_labeler:
         scopes.append(("user_reviewed", [r for r in rows if r["labeler"].strip() == "user_reviewed"]))
+    if has_source:
+        # 원본만: 외부 근거로 판정한 행을 뺀다. 외부 포함 = all
+        scopes.append(("raw_only", [r for r in rows if r["label_source"].strip() == "raw"]))
+        scopes.append(("external_included", rows))
     res = [(sc, *x) for sc, rs in scopes for x in summarize(rs)]
     out = path.parent / "precision.csv"
     with out.open("w", newline="", encoding="utf-8") as f:
@@ -147,6 +160,9 @@ def main(path=None):
         n_rev, n_diff, diff = review_diff(rows)
         n_user = sum(1 for r in rows if r["labeler"].strip() == "user_reviewed")
         print(f"labeler: claude {len(rows) - n_user}, user_reviewed {n_user} (그중 1차 라벨과 비교한 행 {n_rev})")
+        if has_source:
+            n_ext = sum(1 for r in rows if r["label_source"].strip() == "external")
+            print(f"label_source: raw {len(rows) - n_ext}, external {n_ext}")
         print(f"1차 라벨과 검토 라벨이 다른 행 {len(diff)} (type {n_diff['label_type_correct']}, date {n_diff['label_date_correct']})")
         dpath = path.parent / "label_review_diff.csv"
         cols = ["sample_id", "record_id", "stratum", "changed", *[f"claude_{l}" for l in LABELS], *LABELS, "label_note"]

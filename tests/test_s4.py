@@ -100,6 +100,25 @@ def test_precision_scopes_and_review_diff(tmp_path):
     assert (n_rev, n_diff) == (3, {"label_type_correct": 1, "label_date_correct": 1})
 
 
+def test_precision_label_source_scopes(tmp_path):
+    """손으로 만든 4행: 1·2 raw Y, 3 external Y(날짜 Y), 4 raw N. raw_only type 2/3, external_included 3/4"""
+    h = H + ["label_source"]
+    rows = [["1", "e1", "event", "A|x|s", "claude", "Y", "Y", "Y", "Y", "", "raw"],
+            ["2", "e2", "event", "A|x|s", "claude", "Y", "Y", "Y", "Y", "", "raw"],
+            ["3", "e3", "event", "A|x|s", "user_reviewed", "Y", "모름", "Y", "Y", "고시", "external"],
+            ["4", "e4", "event", "A|x|s", "claude", "N", "Y", "N", "Y", "", "raw"]]
+    p = tmp_path / "s.csv"
+    _write(p, h, rows)
+    assert P.main(p) == 0
+    with (tmp_path / "precision.csv").open(encoding="utf-8") as f:
+        res = {(r["scope"], r["label"]): r for r in csv.DictReader(f) if r["group"] == "all"}
+    assert (res[("raw_only", "label_type_correct")]["n"], res[("raw_only", "label_type_correct")]["correct"]) == ("3", "2")
+    assert (res[("external_included", "label_type_correct")]["n"], res[("external_included", "label_type_correct")]["correct"]) == ("4", "3")
+    assert (res[("user_reviewed", "label_date_correct")]["n"], res[("user_reviewed", "label_date_correct")]["correct"]) == ("1", "1")
+    _write(p, h, [["1", "e1", "event", "A|x|s", "claude", "Y", "Y", "Y", "Y", "", "web"]])
+    assert P.main(p) == 1
+
+
 def test_precision_refuses_bad_labeler(tmp_path):
     p = tmp_path / "s.csv"
     _write(p, H, [["1", "e1", "event", "A|x|s", "me", "Y", "Y", "Y", "Y", ""]])
@@ -146,8 +165,10 @@ def test_sample_60(con):
     s = pd.read_csv(ROOT / "outputs/validation/sample_60.csv", dtype=str)
     assert len(s) == 60 and s["record_id"].is_unique
     assert (s["product_code"] == "654700150").any()
-    assert s[["labeler", "claude_label_type_correct", "claude_label_date_correct",
-              "label_type_correct", "label_date_correct", "label_note"]].isna().all().all()
+    # 라벨: 비어 있거나(처음 만든 표본) Y / N / 모름, labeler는 claude / user_reviewed, label_source는 raw / external
+    assert s["label_type_correct"].fillna("").isin(["", "Y", "N", "모름"]).all()
+    assert s["labeler"].fillna("").isin(["", "claude", "user_reviewed"]).all()
+    assert s["label_source"].fillna("").isin(["", "raw", "external"]).all()
     assert s[["month", "product_code", "notes_3m", "stratum_size"]].notna().all().all()
     d = s[s["record_id"].str.startswith("DELISTING:") & s["ledger_claim"].str.contains("interval")]
     assert len(d) and d["interval_days"].notna().all()
@@ -163,25 +184,28 @@ def test_sample_deterministic(tmp_path):
         c.execute("use src")
         a = S4.build_sample(c)
         b = S4.build_sample(c)
+        # 라벨 단 표본은 같은 기록·같은 sample_id로 고정해 다시 채운다 (DECISIONS 2026-11-15)
+        saved = __import__("pandas").read_csv(ROOT / "outputs/validation/sample_60.csv", dtype=str)
+        f = S4.build_sample(c, frozen=saved[["sample_id", "record_id"]])
     finally:
         c.close()
     assert a.equals(b)
-    saved = __import__("pandas").read_csv(ROOT / "outputs/validation/sample_60.csv", dtype=str)
-    assert list(a["record_id"]) == list(saved["record_id"])
+    assert list(f["record_id"]) == list(saved["record_id"]) and list(f["sample_id"].astype(str)) == list(saved["sample_id"])
 
 
 def test_labeled_sample_not_overwritten(tmp_path, monkeypatch):
     """라벨이 있는 sample_60.csv는 덮어쓰지 않고 sample_60.new.csv에 쓴다"""
     import pandas as pd
     from pbd.ledger import s4_analysis as S4
-    (tmp_path / "sample_60.csv").write_text("sample_id,label_type_correct,label_date_correct,label_note\n1,Y,,\n", encoding="utf-8")
+    (tmp_path / "sample_60.csv").write_text("sample_id,record_id,ledger_claim,label_type_correct,label_date_correct,label_note\n1,r1,old,Y,,\n", encoding="utf-8")
     monkeypatch.setattr(S4, "VAL", tmp_path)
     monkeypatch.setattr(S4, "OUT", tmp_path / "s4")
     monkeypatch.setattr(S4, "build_a1", lambda con: {})
     for f in ("build_a2", "build_a2_buckets", "build_a2_snapshot_order", "build_a3"):
         monkeypatch.setattr(S4, f, lambda con: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(S4, "build_a4_with_sensitivity", lambda con: {})
-    monkeypatch.setattr(S4, "build_sample", lambda con: pd.DataFrame({"sample_id": [1], "label_type_correct": [""]}))
+    monkeypatch.setattr(S4, "build_sample", lambda con, frozen=None: pd.DataFrame(
+        {"sample_id": [1], "record_id": ["r1"], "ledger_claim": ["new"], "label_type_correct": [""]}))
 
     class C:
         def execute(self, q):
@@ -190,9 +214,10 @@ def test_labeled_sample_not_overwritten(tmp_path, monkeypatch):
                     return pd.DataFrame({"y": [1]})
             return R()
     S4.write_all(C())
-    assert (tmp_path / "sample_60.csv").read_text(encoding="utf-8").startswith("sample_id,label_type_correct")
+    assert (tmp_path / "sample_60.csv").read_text(encoding="utf-8").startswith("sample_id,record_id,ledger_claim,label_type_correct")
     assert "Y" in (tmp_path / "sample_60.csv").read_text(encoding="utf-8")
-    assert (tmp_path / "sample_60.new.csv").exists()
+    new = pd.read_csv(tmp_path / "sample_60.new.csv", dtype=str)
+    assert new.loc[0, "label_type_correct"] == "Y" and new.loc[0, "claim_changed"] == "True"   # 라벨을 옮겨 붙이고 바뀐 주장을 표시
 
 
 

@@ -1,7 +1,7 @@
 """P1 S3: 신호·이벤트 원장 (docs/PLAN_P1.md §3·§4, 완료 기준 §6 S3).
 
 data/interim/pbd.duckdb의 L1·S2 표에서 다음을 만든다.
-- s3_cal            : 스냅샷 달력 (기준일은 명목 날짜)
+- s3_cal            : 스냅샷 달력 (기준일 = 그 달 1일, 사용자 결정 2026-11-15)
 - s3_entry_exit     : 진입·퇴출 재분류 (§4 F7 7단계). 창을 인자로 받는다 (표본 구간 재현 시험)
 - signal_ledger     : 신호. 비고의 미래 날짜 토큰, (유형, 제품, 신호 날짜)로 하나 (P4: 두 목록 합침, 여러 달에 보여도 하나)
 - signal_outcome    : 신호마다 결과 하나. 확인 스냅샷 = 신호 날짜 이후 첫 스냅샷 (RESUME은 종료일 다음 날 이후)
@@ -87,11 +87,11 @@ def build_signal_ledger(con) -> None:
         select case token_type when 'R2' then 'PRICE_PENDING' when 'R1' then 'LISTING' when 'R5' then 'STAY_RELEASE_PRICE'
                     when 'R9' then 'DELISTING_SCHEDULED' else 'SUSPEND_SCHEDULED' end signal_type,
                token_type source_rule, source_list, list_month, base_date, product_code, token_date signal_date,
-               case when token_type = 'R3b' then token_date end period_start, token_date_end period_end, amount, raw
+               case when token_type = 'R3b' then token_date end period_start, token_date_end period_end, amount, raw, possibly_revised
         from note_token where is_future and token_type in ('R1', 'R2', 'R3', 'R3b', 'R5', 'R9')
         union all
         select 'RESUME_SCHEDULED', 'R3b', source_list, list_month, base_date, product_code, token_date_end,
-               token_date, token_date_end, null, raw
+               token_date, token_date_end, null, raw, possibly_revised
         from note_token where token_type = 'R3b' and is_future_end""")
     con.execute("""create or replace table signal_ledger as
         with g as (select signal_type, product_code, signal_date,
@@ -102,8 +102,11 @@ def build_signal_ledger(con) -> None:
                           count(distinct amount) n_amounts,
                           arg_min(period_start, (source_list <> 'benefit', list_month)) period_start,
                           arg_min(period_end, (source_list <> 'benefit', list_month)) period_end,
-                          arg_min(raw, (source_list <> 'benefit', list_month)) raw
-                   from _sig_raw group by 1, 2, 3),
+                          arg_min(raw, (source_list <> 'benefit', list_month)) raw,
+                          -- 발행 달 토큰의 날짜가 그 달 2일~말일: 월중 수정으로 들어왔을 수 있음 (P2 누수 민감도용, 판정에 쓰지 않음)
+                          bool_or(possibly_revised) filter (where list_month = first_month) possibly_revised
+                   from (select *, min(list_month) over (partition by signal_type, product_code, signal_date) first_month from _sig_raw)
+                   group by 1, 2, 3),
              -- LISTING: 발행 달의 state_asof가 scheduled_listing이면 LISTING_SCHEDULED (그 스냅샷까지의 정보만)
              t as (select g.*, p.state_asof asof_at_issue,
                           case when g.signal_type <> 'LISTING' then g.signal_type
@@ -118,7 +121,7 @@ def build_signal_ledger(con) -> None:
                signal_type2 signal_type, source_rule, source_rules, product_code, market_c4, issued_month,
                (select base_date from s3_cal c where c.list_month = t.issued_month) issued_base_date,
                signal_date, period_start, period_end, amount, n_amounts, source_list, len(source_list) = 2 merged_two_lists,
-               last_seen_month, n_months_seen, asof_at_issue, raw,
+               last_seen_month, n_months_seen, asof_at_issue, raw, coalesce(possibly_revised, false) possibly_revised,
                -- 전제 신호: RESUME_SCHEDULED의 전제는 같은 제품·같은 시작일의 SUSPEND_SCHEDULED (시작일이 발행 시점에 미래였던 것)
                case when signal_type2 = 'RESUME_SCHEDULED' and exists (select 1 from t t2 where t2.signal_type2 = 'SUSPEND_SCHEDULED'
                          and t2.product_code = t.product_code and t2.signal_date = t.period_start)
@@ -140,7 +143,7 @@ def build_signal_outcome(con) -> None:
                                   and t.token_type = 'R2' and t.token_date = s.signal_date) note_in_check,
                           exists (select 1 from note_token t where t.product_code = s.product_code and t.list_month = s.check_month
                                   and t.token_type in ('R3', 'R3b') and t.token_date is distinct from s.period_start) new_susp_in_check,
-                          k.outcome k_outcome, k.reason k_reason, k.reason_source k_reason_source, k.evidence k_evidence,
+                          k.outcome k_outcome, k.reason k_reason, k.reason_source k_reason_source, k.evidence k_evidence, k.reason_external k_reason_external,
                           k.date_gap_days k_gap, k.event_effective_date k_event_date, k.event_date_source k_event_source,
                           x.kind exit_kind
                    from s left join s3_cal c on c.list_month = s.check_month
@@ -198,6 +201,8 @@ def build_signal_outcome(con) -> None:
                     when signal_type = 'RESUME_SCHEDULED' then case when new_susp_in_check then 'new_suspension' else 'still_suspended' end
                end reason,
                case when outcome <> 'not_realized' then null when signal_type = 'SUSPEND_SCHEDULED' then k_reason_source else 'data' end reason_source,
+               -- 외부 자료로 확인한 원인 (reason은 원본에서 나온 사유 그대로, 사용자 결정 2026-11-15)
+               case when signal_type = 'SUSPEND_SCHEDULED' then k_reason_external end reason_external,
                case when signal_type = 'SUSPEND_SCHEDULED' then k_evidence
                     when check_month is null then null
                     when not in_check then check_month || ' 급여목록에 제품 없음'
@@ -215,7 +220,7 @@ def build_signal_outcome(con) -> None:
 
 
 def apply_external_price(con) -> None:
-    """config/external_evidence.yaml price_signal: 가격 예고 미실현 사유(사유는 그대로)에 외부 근거를 붙인다 (사용자 결정 2026-11-15)"""
+    """config/external_evidence.yaml price_signal: 가격 예고 미실현의 외부 원인을 reason_external에 둔다. reason·evidence는 그대로 (사용자 결정 2026-11-15)"""
     path = ROOT / "config/external_evidence.yaml"
     if not path.exists():
         return
@@ -230,9 +235,9 @@ def apply_external_price(con) -> None:
         if n == 0:
             continue                                    # 합성 데이터 등 대상이 없는 실행
         assert n == e["expected_count"], (e["id"], n, e["expected_count"])
-        ext = e["note"] + " | " + " ; ".join(e["evidence"])
-        con.execute(f"""update signal_outcome set reason_source = ?, evidence = '데이터: ' || evidence || ' / 외부: ' || ?
-                        where {cond}""", [e["reason_source"], ext, *args])
+        ext = e["cause"] + ": " + e["note"] + " | " + " ; ".join(e["evidence"])
+        con.execute(f"""update signal_outcome set reason_source = 'data+external', reason_external = ?
+                        where {cond}""", [ext, *args])
 
 
 # ---------------------------------------------------------------- 이벤트

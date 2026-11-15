@@ -297,6 +297,7 @@ def build_signal_checks(con) -> None:
             case when confirm_status = 'confirmed' then 'signal_confirmed'
                  when confirm_status = 'confirmed_other_date' then 'note_' || susp_list_in_check end event_date_source,
             case when reason is not null then 'data' end reason_source,
+            cast(null as varchar) reason_external,
             case when confirm_status in ('confirmed', 'confirmed_other_date') then check_month || ' ' || susp_raw_in_check
                  when reason = 'stay' then check_month || ' 집행정지 비고, 정지 비고 없음'
                  when reason = 'delisted' then check_month || ' 급여목록에 제품 없음'
@@ -306,8 +307,8 @@ def build_signal_checks(con) -> None:
 
 
 def apply_external_evidence(con) -> None:
-    """config/external_evidence.yaml: 외부 자료로 정하거나 확인한 사유 (사용자 결정 9·10차).
-    reason_source = external(외부 자료로만) / data+external(데이터와 외부 자료). keep_data_evidence면 데이터 근거 뒤에 링크를 붙인다."""
+    """config/external_evidence.yaml suspend_signal: 외부 자료로 확인한 원인 (사용자 결정 2026-11-15, 9·10차를 바꿈).
+    reason(원본에서 나온 사유)과 evidence(데이터 근거)는 바꾸지 않는다. 외부 원인은 reason_external에 두고 reason_source = data+external."""
     path = ROOT / "config/external_evidence.yaml"
     if not path.exists():
         return
@@ -319,18 +320,16 @@ def apply_external_evidence(con) -> None:
         if n == 0:
             continue                                    # 합성 데이터 등 대상이 없는 실행
         assert n == e["expected_count"], (e["id"], n, e["expected_count"])
-        src = e.get("reason_source", "external")
-        ext = e["note"] + " | " + " ; ".join(e["evidence"])
-        ev = "'데이터: ' || evidence || ' / 외부: ' || ?" if e.get("keep_data_evidence") else "?"
-        con.execute(f"""update s2_suspend_signal_check set reason = ?, reason_source = ?, evidence = {ev}
-                        where {cond}""", [e["reason"], src, ext, *args])
+        ext = e["cause"] + ": " + e["note"] + " | " + " ; ".join(e["evidence"])
+        con.execute(f"""update s2_suspend_signal_check set reason_source = 'data+external', reason_external = ?
+                        where {cond}""", [ext, *args])
 
 
 COMMENTS = {
-    "state_asof": "명목 기준일 기준: 스냅샷 기준일(파일명의 명목 날짜) 시점의 상태. 그 스냅샷까지의 정보만 쓴다 (뒤의 스냅샷을 지워도 같다). 스냅샷 자체에 명목 기준일 뒤의 정보가 들어 있을 수 있다",
+    "state_asof": "적용 기준일(그 달 1일) 시점의 상태. 그 스냅샷까지의 정보만 쓴다 (뒤의 스냅샷을 지워도 같다). 파일이 월중에 수정됐을 수 있어 1일 뒤의 정보가 들어 있을 수 있다",
     "state_eom": "월말 상태. 이후 스냅샷으로 확인된 것(미래 신호 확인, 2개월 공백 복귀, 늦게 보인 지난 날짜)만 반영",
     "exposure_frac": "그 달 급여된 일수 / 그 달 일수. state_eom 기준",
-    "stay_flag": "기준일 시점 값(명목 기준일 기준): 그 달 비고에 집행정지(R4)가 있고 명목 기준일 이전 해제(R5)가 없음. 늦게 보인 R4·R5 날짜로 고쳐 쓰지 않는다 (날짜는 S3 이벤트 유효일)",
+    "stay_flag": "적용 기준일(그 달 1일) 시점 값: 그 달 비고에 집행정지(R4)가 있고(R4 날짜는 법원 결정일이라 보지 않음) 1일 이전 해제(R5)가 없음. 늦게 보인 R4·R5 날짜로 고쳐 쓰지 않는다 (날짜는 S3 이벤트 유효일)",
     "late_note_revised": "다음 스냅샷에서 처음 보인 지난 날짜(R6 해제일·R3 정지일·R3b 시작일, 이 달 안)로 state_eom·exposure_frac을 고쳐 씀",
     "product_role": "그 달 관측: 대체조제 행의 역할, 목록에 없으면 오렌지북 공고대조약",
     "product_role_carried": "그 달 대체조제 값, 없으면 과거 달 대체조제 값(앞으로만 이어 씀), 없으면 오렌지북 공고대조약",

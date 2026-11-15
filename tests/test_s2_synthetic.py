@@ -315,7 +315,7 @@ def test_suspend_signal_check_classes(con):
 
 def test_stay_flag_comment(con):
     c = con.execute("""select comment from duckdb_columns() where table_name = 'product_state_month' and column_name = 'stay_flag'""").fetchone()[0]
-    assert c.startswith("기준일 시점 값")
+    assert c.startswith("적용 기준일(그 달 1일) 시점 값")   # 사용자 결정 2026-11-15
 
 
 def test_suspend_signal_outcome_and_event_date(con):

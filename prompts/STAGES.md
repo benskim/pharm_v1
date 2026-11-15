@@ -30,7 +30,7 @@ CLAUDE.md, docs/DATA.md, docs/PLAN_P1.md, docs/PLAN_P2.md, docs/NOTE_RULES.md, d
 reports/S0_result.md와 내가 단 답을 읽고 P1 S1만 수행해. 설계는 docs/PLAN_P1.md §4, 완료 기준은 §6의 S1.
 - L1 테이블: snapshot_inventory, stg_benefit, stg_substitute, stg_usage(원본 단위, observed 포함), note_token(is_future 포함), attr_2026.
 - 테스트를 먼저 쓴다. 기대값은 docs/NOTE_RULES.md의 문형 예시와 reference 출력에서 가져오고 구현 출력으로 만들지 않는다.
-- is_future는 스냅샷의 실제 기준일과 비교한다 (2025-03-04 같은 달 포함 테스트). 기간 명시 정지(R3b)는 시작일·종료일을 각각 판정한다.
+- is_future는 그 달 1일과 비교한다 (사용자 결정 2026-11-15로 바뀜. 이전: 실제 기준일 2025-03-04). 원본 기준일자는 base_date_raw로 보존. 기간 명시 정지(R3b)는 시작일·종료일을 각각 판정한다.
 - S0에서 정한 변형 문형 테스트: U1→R4, U4·U5(괄호)→R2, U6→R5, U9(신설)→R1, U2·U3·U8→R3b, U7→R9.
 - make check-sample로 표본 구간 숫자를 reference와 비교한다.
 ```

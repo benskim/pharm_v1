@@ -212,17 +212,21 @@ def test_state_asof_ignores_later_snapshots_real(con, truncated):
 
 
 def test_external_evidence_kyongbo(con):
-    """2025-06 경보제약 23건: not_realized, 집행정지, reason_source = external, 근거 링크 (사용자 결정 9차)"""
-    rows = con.execute("""select reason, reason_source, evidence from s2_suspend_signal_check
+    """2025-06 경보제약 23건 (사용자 결정 2026-11-15): reason은 원본 사유 note_gone(7월 제품 있고 비고 없음),
+    외부 원인 "집행정지"와 링크는 reason_external, reason_source = data+external. evidence는 데이터 근거만"""
+    rows = con.execute("""select reason, reason_source, evidence, reason_external from s2_suspend_signal_check
                           where signal_month = '2025-06' and token_date = '2025-06-24'""").fetchall()
     assert len(rows) == 23
-    for reason, src, ev in rows:
-        assert (reason, src) == ("stay", "external")
+    for reason, src, ev, ext in rows:
+        assert (reason, src) == ("note_gone", "data+external")
+        assert ev == "2025-07 제품 있음, 정지·집행정지 비고 없음"
+        assert ext.startswith("집행정지: ")
         for url in ("https://dailypharm.com/user/news/4876", "https://dailypharm.com/user/news/4216",
                     "https://www.medigatenews.com/news/1252800688"):
-            assert url in ev
+            assert url in ext
+    # 원본이 아닌 곳에서 사유를 정한 신호는 없다
     assert con.execute("""select count(*) from s2_suspend_signal_check where outcome = 'not_realized'
-                          and reason_source not in ('data', 'external', 'data+external')""").fetchone()[0] == 0
+                          and reason_source not in ('data', 'data+external')""").fetchone()[0] == 0
 
 
 def test_shifted_date_2022_09(con):
@@ -239,19 +243,22 @@ def test_shifted_date_2022_09(con):
 def test_nominal_base_date_comments(con):
     c = dict(con.execute("""select table_name || '.' || column_name, comment from duckdb_columns()
                             where table_name in ('snapshot_inventory', 'note_token', 'product_state_month')""").fetchall())
-    assert c["snapshot_inventory.base_date"].startswith("기준일: 파일명 기준 명목 날짜")
-    assert "명목 기준일" in c["note_token.is_future"]
-    assert "명목 기준일" in c["product_state_month.state_asof"]
-    assert "명목 기준일" in c["product_state_month.stay_flag"]
+    # 사용자 결정 2026-11-15: 적용 기준일은 항상 그 달 1일
+    assert c["snapshot_inventory.base_date"].startswith("적용 기준일: 항상 그 달 1일")
+    assert "그 달 1일" in c["note_token.is_future"]
+    assert "그 달 1일" in c["product_state_month.state_asof"]
+    assert "그 달 1일" in c["product_state_month.stay_flag"]
+    assert con.execute("select count(*) from snapshot_inventory where base_date <> date_trunc('month', base_date)").fetchone()[0] == 0
 
 
 def test_donga_2022_05_evidence(con):
-    """2022-05 동아에스티 72건: not_realized, 집행정지, reason_source = data+external, 데이터 근거 + 링크 2개 (사용자 결정 10차)"""
-    rows = con.execute("""select outcome, reason, reason_source, evidence from s2_suspend_signal_check
+    """2022-05 동아에스티 72건: not_realized, 원본 사유 stay(확인 스냅샷의 집행정지 비고), reason_source = data+external.
+    외부 원인·링크는 reason_external (사용자 결정 10차 → 2026-11-15에 칸을 나눔)"""
+    rows = con.execute("""select outcome, reason, reason_source, evidence, reason_external from s2_suspend_signal_check
                           where signal_month = '2022-05' and token_type = 'R3b' and token_date = '2022-08-01'""").fetchall()
     assert len(rows) == 72
-    for outcome, reason, src, ev in rows:
+    for outcome, reason, src, ev, ext in rows:
         assert (outcome, reason, src) == ("not_realized", "stay", "data+external")
-        assert ev.startswith("데이터: 2022-08 집행정지 비고")
-        assert "https://dailypharm.com/user/news/39450" in ev and "https://www.dailypharm.com/user/news/33781" in ev
+        assert ev.startswith("2022-08 집행정지 비고")
+        assert "https://dailypharm.com/user/news/39450" in ext and "https://www.dailypharm.com/user/news/33781" in ext
 

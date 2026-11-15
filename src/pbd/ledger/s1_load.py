@@ -111,7 +111,9 @@ def _select_for_file(con, lst: str, path) -> str:
 def build_stg_snapshot(con, lst: str, files) -> None:
     sql = " union all by name ".join(_select_for_file(con, lst, f) for f in files)
     con.execute(f"""create or replace table stg_{lst} as
-        select strftime(base_date, '%Y-%m') as list_month, *, substr(ingredient_code, 1, 4) as c4,
+        -- 적용 기준일 = 그 달 1일 (사용자 결정 2026-11-15). 원본 기준일자 칸은 base_date_raw로 보존하고 판정에 쓰지 않는다
+        select strftime(base_date, '%Y-%m') as list_month, * replace (cast(date_trunc('month', base_date) as date) as base_date),
+               base_date as base_date_raw, substr(ingredient_code, 1, 4) as c4,
                case when regexp_full_match(product_code, '[0-9]{{9}}') then 'product_candidate' else 'non_product' end as row_kind
         from ({sql}) order by list_month, product_code, src_file, src_row""")
 
@@ -119,7 +121,7 @@ def build_stg_snapshot(con, lst: str, files) -> None:
 def create_empty_stg(con, lst: str) -> None:
     cols = ", ".join(f"cast(null as {SQLTYPE[k]}) as {o}" for o, k in SPEC[lst])
     con.execute(f"""create or replace table stg_{lst} as select cast(null as varchar) list_month, {cols},
-        cast(null as varchar) product_code_raw, cast(null as varchar) src_file, cast(null as bigint) src_row,
+        cast(null as varchar) product_code_raw, cast(null as varchar) src_file, cast(null as bigint) src_row, cast(null as date) base_date_raw,
         cast(null as varchar) c4, cast(null as varchar) row_kind limit 0""")
 
 
@@ -150,6 +152,9 @@ def build_note_token(con) -> None:
         select s.source_list, s.list_month, s.base_date, s.product_code, p.seq, p.part, p.token_type, p.variant,
                p.token_date, p.token_date_end, p.amount, p.raw, s.note as note_raw,
                p.token_date > s.base_date as is_future, p.token_date_end > s.base_date as is_future_end,
+               -- 날짜가 그 달 2일~말일: 월중 수정으로 나중에 들어왔을 수 있다 (판정에 쓰지 않음, P2 누수 민감도용)
+               coalesce((strftime(p.token_date, '%Y-%m') = s.list_month and day(p.token_date) >= 2)
+                        or (strftime(p.token_date_end, '%Y-%m') = s.list_month and day(p.token_date_end) >= 2), false) as possibly_revised,
                s.src_file, s.src_row
         from s join note_parse p using (note)
         order by s.source_list, s.list_month, s.product_code, s.src_file, s.src_row, p.seq""")
@@ -200,11 +205,13 @@ EXPLAINED_ROWNO_DUP = {("benefit", "2023-11")}
 
 
 S1_COMMENTS = {
-    ("snapshot_inventory", "base_date"): "기준일: 파일명 기준 명목 날짜. 실제 작성 시점은 그 달 안의 이후일 수 있음 (파일이 그 달 안에 고쳐 배포되고 파일명은 바뀌지 않음)",
-    ("snapshot_inventory", "filename_revision_date"): "원본 파일명의 수정일 ('_1.21.수정'). 있는 달만. 명목 기준일보다 뒤면 그 뒤의 정보가 들어 있을 수 있음",
-    ("note_token", "base_date"): "스냅샷의 명목 기준일 (snapshot_inventory.base_date와 같음)",
-    ("note_token", "is_future"): "token_date > 명목 기준일. 명목 기준일 기준 판정 (실제 작성일 기준 아님)",
-    ("note_token", "is_future_end"): "token_date_end > 명목 기준일 (R3b 종료일). 명목 기준일 기준",
+    ("snapshot_inventory", "base_date"): "적용 기준일: 항상 그 달 1일 (사용자 결정 2026-11-15). 파일의 공개·수정 시점은 알 수 없다",
+    ("snapshot_inventory", "base_date_raw"): "원본 기준일자 칸의 값 (참고). 판정에 쓰지 않는다. 1일이 아닌 달: 2023-04-08, 2023-09-05, 2025-03-04",
+    ("snapshot_inventory", "filename_revision_date"): "원본 파일명의 수정일 ('_1.21.수정'). 참고만: 파일명 날짜는 수정이 있었다는 근거로도 없었다는 근거로도 쓰지 않는다",
+    ("note_token", "base_date"): "적용 기준일: 그 달 1일 (snapshot_inventory.base_date와 같음)",
+    ("note_token", "is_future"): "token_date > 그 달 1일 (적용 기준일 기준 판정)",
+    ("note_token", "is_future_end"): "token_date_end > 그 달 1일 (R3b 종료일)",
+    ("note_token", "possibly_revised"): "토큰 날짜가 그 달 2일~말일: 월중 수정으로 나중에 들어왔을 수 있음. 판정에 쓰지 않고 P2 누수 민감도에만 쓴다",
 }
 
 
@@ -232,22 +239,22 @@ def build_snapshot_inventory(con, files: dict, start: str, end: str) -> None:
     con.execute(f"""create or replace table snapshot_inventory as
         with cal as (select strftime(d, '%Y-%m') list_month from range(cast('{start}-01' as date), cast('{end}-01' as date) + interval 1 month, interval 1 month) t(d)),
         lists as (select unnest(['benefit', 'substitute']) source_list),
-        s as (select 'benefit' source_list, list_month, min(base_date) base_date, count(distinct base_date) n_base_dates,
+        s as (select 'benefit' source_list, list_month, min(base_date) base_date, min(base_date_raw) base_date_raw, count(distinct base_date_raw) n_base_dates,
                      min(source_file) source_file, {agg} from stg_benefit group by 2
               union all
-              select 'substitute', list_month, min(base_date), count(distinct base_date), min(source_file), {agg}
+              select 'substitute', list_month, min(base_date), min(base_date_raw), count(distinct base_date_raw), min(source_file), {agg}
               from stg_substitute group by 2),
         -- 원본 파일명에 적힌 건수와의 차이. 설명: 미래 날짜 등재 제품(BACKLOG X2) + non_product 행
         fr as (select source_list, list_month, count(distinct product_code) n_future_listing
                from note_token where token_type = 'R1' and is_future group by 1, 2)
-        select lists.source_list, cal.list_month, s.list_month is null as missing, s.base_date, s.n_base_dates, s.source_file,
+        select lists.source_list, cal.list_month, s.list_month is null as missing, s.base_date, s.base_date_raw, s.n_base_dates, s.source_file,
                coalesce(s.n_rows, 0) n_rows, s.n_products, s.n_code_padded, s.n_non_product, s.n_note_rows, s.n_price_null, s.n_rowno_dup,
                try_cast(replace(regexp_extract(s.source_file, '\\(([0-9,]+)\\)', 1), ',', '') as bigint) n_rows_in_filename,
                s.n_rows - n_rows_in_filename as diff_vs_filename,
                coalesce(fr.n_future_listing, 0) n_future_listing,
                case when (lists.source_list, cal.list_month) in ({ex}) then s.n_rowno_dup else 0 end n_explained_other,
                diff_vs_filename - coalesce(fr.n_future_listing, 0) - s.n_non_product - n_explained_other as diff_unexplained,
-               -- 파일명의 수정일 '_1.21.수정' (2022-01~2023-11 급여목록 일부). 명목 기준일보다 뒤일 수 있다
+               -- 파일명의 수정일 '_1.21.수정' (2022-01~2023-11 급여목록 일부). 참고만: 수정 여부·시점의 근거로 쓰지 않는다 (사용자 결정 2026-11-15)
                case when regexp_matches(s.source_file, '_[0-9]{{1,2}}\\.[0-9]{{1,2}}\\.\\s*수정') then
                     make_date(cast(year(s.base_date) as bigint)
                                 - case when cast(regexp_extract(s.source_file, '_([0-9]{{1,2}})\\.([0-9]{{1,2}})\\.\\s*수정', 1) as int) > month(s.base_date) + 6 then 1 else 0 end,

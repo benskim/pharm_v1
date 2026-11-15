@@ -116,9 +116,16 @@ def test_shifted_suspension_2022_09(con):
 
 
 def test_external_reason_kept(con):
+    """사용자 결정 2026-11-15: reason은 원본 사유. 경보제약 23건은 note_gone(원본) + reason_external "집행정지".
+    동아에스티 72건은 원본 사유 stay + reason_external. 642302580 1건은 data만"""
     r = dict(con.execute("""select reason_source, count(*) from signal_outcome where signal_type = 'SUSPEND_SCHEDULED'
                             and outcome = 'not_realized' and reason = 'stay' group by 1""").fetchall())
-    assert r == {"data": 1, "external": 23, "data+external": 72}
+    assert r == {"data": 1, "data+external": 72}
+    k = con.execute("""select reason, reason_source, reason_external from signal_outcome where signal_type = 'SUSPEND_SCHEDULED'
+                       and issued_month = '2025-06' and signal_date = '2025-06-24'""").fetchall()
+    assert len(k) == 23 and all(x[:2] == ("note_gone", "data+external") and x[2].startswith("집행정지: ") for x in k)
+    assert con.execute("""select count(*) from signal_outcome where reason_source = 'external'""").fetchone()[0] == 0
+    assert con.execute("""select count(*) from signal_outcome where (reason_source = 'data+external') <> (reason_external is not null)""").fetchone()[0] == 0
 
 
 def test_unverifiable_separate_from_censored(con):
@@ -183,12 +190,12 @@ def test_resume_moot_2022_05(con):
 
 
 def test_price_external_evidence(con):
-    """가격 예고 미실현 77건: 사유 그대로, 동아에스티 74·마더스제약 3은 data+external과 링크 (사용자 결정 2026-11-15)"""
+    """가격 예고 미실현 77건: 사유 그대로, 동아에스티 74·마더스제약 3은 data+external, 외부 원인·링크는 reason_external (사용자 결정 2026-11-15)"""
     rows = dict(con.execute("""select issued_month, count(*) from signal_outcome where signal_type = 'PRICE_PENDING'
                                and reason = 'price_kept_stay_note' and reason_source = 'data+external' group by 1""").fetchall())
     assert rows == {"2022-05": 74, "2024-02": 3}
-    ev = con.execute("""select evidence from signal_outcome where product_code = '622802320' and signal_type = 'PRICE_PENDING'""").fetchone()[0]
-    assert ev.startswith("데이터: 2024-03 상한금액 116") and "https://dailypharm.com/user/news/19265" in ev and "342239" in ev
+    ev, ext = con.execute("""select evidence, reason_external from signal_outcome where product_code = '622802320' and signal_type = 'PRICE_PENDING'""").fetchone()
+    assert ev.startswith("2024-03 상한금액 116") and "https://dailypharm.com/user/news/19265" in ext and "342239" in ext
     assert con.execute("""select count(*) from signal_outcome where signal_type = 'PRICE_PENDING' and reason = 'price_kept_stay_note'
                           and reason_source = 'data'""").fetchone()[0] == 0
 

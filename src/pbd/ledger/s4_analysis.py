@@ -26,7 +26,7 @@ OUT = ROOT / "outputs/s4"
 VAL = ROOT / "outputs/validation"
 PARAMS = load_yaml("params.yaml")
 ROLE_KO = {"reference": "대조약", "bioequiv": "생동인정", None: "모름"}
-LABEL_COLS = ("labeler", "claude_label_type_correct", "claude_label_date_correct",
+LABEL_COLS = ("labeler", "label_source", "claude_label_type_correct", "claude_label_date_correct",
               "label_type_correct", "label_date_correct", "label_note")
 MUST_INCLUDE = ["654700150"]                     # DECISIONS 2026-11-14 7차: S4 표본에 반드시 포함
 
@@ -213,9 +213,11 @@ def build_a4_with_sensitivity(con) -> dict[str, pd.DataFrame]:
 
 
 # ---------------------------------------------------------------- A6
-def build_sample(con, n_total: int = 60, seed: int | None = None) -> pd.DataFrame:
+def build_sample(con, n_total: int = 60, seed: int | None = None, frozen: pd.DataFrame | None = None) -> pd.DataFrame:
     """층화 표본. 층 = (record_type, 유형, kind 또는 outcome, date_source). 층마다 1건, 남는 수는 층 크기에 비례.
-    층 안에서는 연도를 돌아가며 고르고, 같은 연도 안의 순서는 md5(seed || id)로 고정한다."""
+    층 안에서는 연도를 돌아가며 고르고, 같은 연도 안의 순서는 md5(seed || id)로 고정한다.
+    frozen(sample_id, record_id): 라벨을 단 표본을 고정한다. 같은 기록·같은 sample_id로 설명 칸·층·층 크기만 지금 원장으로 다시 채운다
+    (원장 규칙이 바뀌어 층 배분이 달라져도 라벨 단 기록을 바꾸지 않는다, DECISIONS 2026-11-15)."""
     seed = PARAMS["seed"] if seed is None else seed
     con.execute("""create or replace temp table _cand as
         select 'event' record_type, event_id record_id, product_code, event_type || '|' || kind || '|' || date_source stratum,
@@ -257,6 +259,10 @@ def build_sample(con, n_total: int = 60, seed: int | None = None) -> pd.DataFram
                     taken.add(r.record_id)
                     k -= 1
     df = pd.DataFrame(picked)[["record_type", "record_id", "product_code", "stratum", "month", "year"]]
+    if frozen is not None:
+        df = cand[cand["record_id"].isin(frozen["record_id"])][["record_type", "record_id", "product_code", "stratum", "month", "year"]]
+        missing = set(frozen["record_id"]) - set(df["record_id"])
+        assert not missing, f"고정 표본의 기록이 원장에 없다: {sorted(missing)}"
     con.register("_pick", df)
     out = con.execute("""
         with p as (select * from _pick),
@@ -298,10 +304,14 @@ def build_sample(con, n_total: int = 60, seed: int | None = None) -> pd.DataFram
                 from s3_cal c2 where c2.mi between (select mi from s3_cal where list_month = m.look_month) - 2
                                                   and (select mi from s3_cal where list_month = m.look_month)) prices_3m,
                -- 라벨 칸 (LABELING.md): labeler = claude(1차) / user_reviewed(사용자 검토). claude_label_* = 1차 라벨 보존용
-               '' labeler, '' claude_label_type_correct, '' claude_label_date_correct,
+               '' labeler, '' label_source, '' claude_label_type_correct, '' claude_label_date_correct,
                '' label_type_correct, '' label_date_correct, '' label_note
         from m order by sample_id""").df()
     con.unregister("_pick")
+    if frozen is not None:
+        sid = dict(zip(frozen["record_id"], frozen["sample_id"].astype(int)))
+        out["sample_id"] = out["record_id"].map(sid)
+        out = out.sort_values("sample_id").reset_index(drop=True)
     return out
 
 
@@ -316,14 +326,23 @@ def write_all(con) -> dict[str, pd.DataFrame]:
     tabs["a5_compare_by_year"] = con.execute("select * exclude (n_check) from s3_compare_by_year order by year, event_type").df()
     for name, df in tabs.items():
         _dump(df, OUT / f"{name}.csv")
-    sample = build_sample(con)
     target = VAL / "sample_60.csv"
+    sample = None
     if target.exists():                             # 라벨을 채운 파일은 덮어쓰지 않는다
         old = pd.read_csv(target, dtype=str)
         labs = [c for c in LABEL_COLS if c in old.columns]
         if labs and old[labs].notna().any().any():
+            # 같은 기록으로 고정해 다시 채우고 라벨을 옮겨 붙인다. 원장 주장이 바뀐 행은 claim_changed (다시 판정)
+            sample = build_sample(con, frozen=old[["sample_id", "record_id"]])
+            keep = old.set_index("record_id")
+            for c in LABEL_COLS:
+                if c in keep.columns:
+                    sample[c] = sample["record_id"].map(keep[c]).fillna("")
+            sample["claim_changed"] = sample["record_id"].map(keep["ledger_claim"]) != sample["ledger_claim"]
             target = VAL / "sample_60.new.csv"
-            print(f"sample_60.csv에 라벨이 있어 덮어쓰지 않고 {target.name}에 썼다")
+            print(f"sample_60.csv에 라벨이 있어 같은 기록으로 다시 채워 {target.name}에 썼다 (원장 주장이 바뀐 행 {int(sample['claim_changed'].sum())})")
+    if sample is None:
+        sample = build_sample(con)
     _dump(sample, target)
     tabs["sample_60"] = sample
     return tabs

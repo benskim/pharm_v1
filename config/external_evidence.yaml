@@ -1,11 +1,12 @@
-# 데이터가 아닌 외부 자료로 정한 사유 (사용자 결정 2026-11-14 9차). 크롤링하지 않는다: 링크는 사용자가 준 것이다.
-# s2_suspend_signal_check에서 조건에 맞는 신호의 reason을 덮어쓰고 reason_source = external, evidence = 링크로 둔다.
+# 외부 자료로 확인한 원인 (사용자 결정 2026-11-15: 9·10차를 바꿈). 크롤링하지 않는다: 링크는 사용자가 준 것이다.
+# 급여목록은 상태만 보여 주고 원인은 말하지 않는다. reason(원본에서 나온 사유)과 evidence(데이터 근거)는 바꾸지 않고,
+# 외부 원인은 reason_external = "cause: note | 링크"로 두며 reason_source = data+external.
 # 조건에 맞는 건수가 expected_count와 다르면 멈춘다.
 suspend_signal:
   - id: kyongbo_2025_06
     match: {signal_month: "2025-06", token_type: "R3", token_date: "2025-06-24"}
     expected_count: 23
-    reason: stay
+    cause: "집행정지"          # 원본 사유는 note_gone (확인 스냅샷 2025-07에 제품 있고 정지·집행정지 비고 없음)
     note: "(주)경보제약 23개 제품. 2025-06-18 잠정 집행정지, 2025-07-09 본 집행정지 인용, 복지부 급여중지 안내와 유예 (외부 보도)"
     evidence:
       - https://dailypharm.com/user/news/4876
@@ -14,21 +15,19 @@ suspend_signal:
   - id: donga_2022_05
     match: {signal_month: "2022-05", token_type: "R3b", token_date: "2022-08-01"}
     expected_count: 72
-    reason: stay
-    reason_source: data+external      # 데이터: 이후 스냅샷의 집행정지 비고 / 외부: 아래 기사
-    keep_data_evidence: true
+    cause: "8월 급여정지에 대한 집행정지"   # 원본 사유는 stay (확인 스냅샷 2022-08에 집행정지 비고)
     note: "동아에스티(주) 72개 제품. 같은 칸의 집행정지(22.5.3.)는 122개 품목 약가인하에 대한 것이고 8월 급여정지에 대한 것이 아니다 (사용자 확인). 급여정지에 대한 집행정지: 2022-05-09 잠정(데이터 비고 `집행정지(22.5.9.)`의 날짜. 5/10은 기사 보도일), 6/3 연장(12/2까지), 12/1 재연장 (외부 보도)"
     evidence:
       - https://dailypharm.com/user/news/39450
       - https://www.dailypharm.com/user/news/33781
 
-# 가격 예고 (PRICE_PENDING) 미실현 사유의 외부 근거 (사용자 결정 2026-11-15). 사유(price_kept_stay_note)는 바꾸지 않고
-# reason_source = data+external, evidence = 데이터 근거 + 외부 메모·링크. 조건에 맞는 건수가 expected_count와 다르면 멈춘다.
+# 가격 예고 (PRICE_PENDING) 미실현의 외부 원인 (사용자 결정 2026-11-15). 사유(price_kept_stay_note)와 evidence는 바꾸지 않고
+# reason_external에 둔다. 조건에 맞는 건수가 expected_count와 다르면 멈춘다.
 price_signal:
   - id: donga_2022_05_price
     match: {issued_month: "2022-05", signal_date: "2022-05-04", reason: "price_kept_stay_note"}
     expected_count: 74
-    reason_source: data+external
+    cause: "약가인하 잠정 효력정지"
     note: "동아에스티(주) 122개 품목 약가인하에 대한 잠정 효력정지. 집행정지 날짜는 데이터 비고 2022-05-03 (기사 보도일 2022-05-04)"
     evidence:
       - https://medigatenews.com/news/2233088369
@@ -36,7 +35,7 @@ price_signal:
     match: {issued_month: "2024-02", signal_date: "2024-03-01", reason: "price_kept_stay_note"}
     product_codes: ["622802320", "622804240", "622802960"]   # 스토엠정 116→105, 스토엠투엑스정 191→174, 레이본정 220→187 (대조 일치)
     expected_count: 3
-    reason_source: data+external
+    cause: "약가인하 집행정지"
     note: "(주)마더스제약 3개 품목 집행정지 인용 (2025-01-31까지). 집행정지 날짜는 데이터 비고 2024-02-29 (기사 보도일 2024-03-04). 2심에서 인하 처분 취소 (2026-09-08 보도, 분석 기간 밖)"
     evidence:
       - https://dailypharm.com/user/news/19265
