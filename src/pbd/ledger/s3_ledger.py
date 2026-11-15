@@ -134,10 +134,26 @@ def build_signal_ledger(con) -> None:
 
 def build_signal_outcome(con) -> None:
     con.execute("""create or replace table signal_outcome as
-        with s as (select l.*,
+        -- 확인 스냅샷 (사용자 결정 2026-11-15): 예고 내용이 처음 반영된 스냅샷. 날짜는 비교하지 않는다.
+        --   가격 예고·집행정지 해제(금액): 발행 뒤 상한금액이 예고 금액이 된 첫 스냅샷 / 삭제 예고: 발행 뒤 제품이 없는 첫 스냅샷.
+        --   반영되지 않았으면 신호 날짜 이후 첫 스냅샷(check_month_by_date)에서 결과를 판정한다.
+        --   정지·복귀·등재 예고는 예고 내용이 날짜라 반영을 날짜 없이 볼 수 없다: check_month_by_date 그대로.
+        with s0 as (select l.*,
                           (select min(list_month) from s3_cal c where case when l.signal_type = 'RESUME_SCHEDULED'
-                                then c.base_date > l.signal_date else c.base_date >= l.signal_date end) check_month
+                                then c.base_date > l.signal_date else c.base_date >= l.signal_date end) check_month_by_date
                    from signal_ledger l),
+             s as (select s0.*, coalesce(
+                          case when s0.signal_type in ('PRICE_PENDING', 'STAY_RELEASE_PRICE') and s0.amount is not null then
+                                    (select min(p.list_month) from product_state_month p where p.product_code = s0.product_code
+                                       and p.list_month > s0.issued_month and p.list_month <= coalesce(s0.check_month_by_date, '9999')
+                                       and p.price_listed = s0.amount)
+                               when s0.signal_type = 'DELISTING_SCHEDULED' then
+                                    (select min(c.list_month) from s3_cal c where c.list_month > s0.issued_month
+                                       and c.list_month <= coalesce(s0.check_month_by_date, '9999')
+                                       and not exists (select 1 from product_state_month p where p.product_code = s0.product_code
+                                                       and p.list_month = c.list_month)) end,
+                          s0.check_month_by_date) check_month
+                   from s0),
              j0 as (select s.*, c.base_date check_base, p.product_code is not null in_check, p.price_listed check_price,
                           p.state_asof check_asof, p.stay_flag check_stay,
                           (select q.price_listed from product_state_month q where q.product_code = s.product_code
@@ -183,7 +199,7 @@ def build_signal_outcome(con) -> None:
                    end outcome
                    from j)
         select signal_id, signal_type, source_rule, product_code, issued_month, signal_date, outcome, parent_signal_id,
-               check_month, case when outcome in ('realized', 'realized_partial') then check_month end realized_month,
+               check_month, check_month_by_date, case when outcome in ('realized', 'realized_partial') then check_month end realized_month,
                datediff('day', issued_base_date, signal_date) lead_days,
                case when check_month is not null then datediff('day', signal_date, check_base) end confirm_lag_days,
                case when signal_type in ('PRICE_PENDING', 'STAY_RELEASE_PRICE') and outcome = 'realized_partial'

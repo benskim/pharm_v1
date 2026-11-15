@@ -44,13 +44,13 @@
 **신호 유형** (1차)
 | signal_type | 출처 비고 | 실현 판정 |
 |---|---|---|
-| `PRICE_PENDING` | R2 가격 예고 | 신호 날짜 이후 첫 스냅샷의 금액 = 예고 금액. 금액이 바뀌었지만 다르면 `realized_partial`. 그대로면 `not_realized`, 사유 delisted / suspended / `price_kept_stay_note`(관측만, 집행정지와 연결하지 않음) / `note_gone_price_kept` 등 (S3) |
+| `PRICE_PENDING` | R2 가격 예고 | **예고 내용이 처음 반영된 스냅샷**(발행 뒤 상한금액이 예고 금액이 된 첫 스냅샷, 날짜 비교 없음, 2026-11-15 사용자 결정)이 확인 스냅샷이고 `realized`. 반영되지 않았으면 신호 날짜 이후 첫 스냅샷에서: 금액 = 예고 금액. 금액이 바뀌었지만 다르면 `realized_partial`. 그대로면 `not_realized`, 사유 delisted / suspended / `price_kept_stay_note`(관측만, 집행정지와 연결하지 않음) / `note_gone_price_kept` 등 (S3) |
 | `LISTING_SCHEDULED` | R1 등재 예정 (처음 관측된 제품) | 신호 날짜 이후 첫 스냅샷에 제품이 있고 정지·삭제가 아님 |
 | `LISTING_NOTE_EXISTING` | R1 등재 예정 (이미 급여 중인 제품) | 상태 변화 없음. 실현율 계산에서 따로 보고 |
 | `STAY_RELEASE_PRICE` | R5 집행정지 해제 및 인하 (U6 변형 포함) | 해제 후 첫 스냅샷의 인하 여부. 이벤트 쌍(STAY_END + PRICE_CHANGE)은 확인 뒤에 만든다 |
 | `SUSPEND_SCHEDULED` | R3 급여정지의 미래 날짜, R3b 기간 명시 정지의 미래 시작일. 유형을 나누지 않고 `source_rule`(R3 / R3b)로 구분 (9차) | 신호 날짜 이후 첫 스냅샷에서 같은 제품의 **정지 비고(R3·R3b)가 확인됨** (2026-11-14 8차). 같은 정지일이면 `realized`: SUSPEND 이벤트 날짜 = 신호 날짜 (`signal_confirmed`), 시작 달의 `exposure_frac`을 고쳐 쓴다. 정지일이 다르면 `realized_partial`(날짜 차이 기록, 예: 2022-09 39건 +1일): SUSPEND 이벤트 날짜 = 확인된 비고의 정지일 (`note_benefit`/`note_substitute`). **예고 날짜는 어떤 이벤트에도 쓰지 않는다.** `not_realized` 사유에는 출처 `reason_source`(data / external)와 근거 `evidence`를 둔다. external은 외부 자료로 정한 사유(링크)이고, 실현율 표에서 따로 센다. `not_realized` 사유: **집행정지**(확인 스냅샷에 정지 비고 없이 집행정지 비고) / **삭제**(확인 스냅샷에 제품 없음) / **비고 사라짐**(제품은 있고 정지·집행정지 비고 없음). R3b의 종료일이 확인 스냅샷 기준일보다 앞서면 `unverifiable`. S2 근거 표 `s2_suspend_signal_check` (`NOTE_RULES.md` §2) |
 | `RESUME_SCHEDULED` | R3b 기간 명시 정지의 미래 종료일 | 종료일 이후 첫 스냅샷에 제품이 있고, 새 정지 비고나 삭제가 없음. RESUME 이벤트 날짜는 종료일 다음 날 (`note_benefit` / `note_substitute`) |
-| `DELISTING_SCHEDULED` | R9 급여삭제 예정 | 신호 날짜 이후 첫 스냅샷에서 제품이 사라짐. **F7 재분류(코드 교체·양도양수)를 먼저 거친다**. 1건이라 A1에서 건수로만 보고 |
+| `DELISTING_SCHEDULED` | R9 급여삭제 예정 | 발행 뒤 제품이 처음 사라진 스냅샷(없으면 신호 날짜 이후 첫 스냅샷)에서 제품이 사라짐. **F7 재분류(코드 교체·양도양수)를 먼저 거친다**. 1건이라 A1에서 건수로만 보고 |
 
 신호 날짜가 미래가 아닌 R2·R5 비고(이미 적용된 날짜)는 신호가 아니라 이벤트의 날짜 근거다.
 
@@ -67,6 +67,8 @@
 | `unverifiable` | 확인할 스냅샷이 오기 전에 신호의 기간이 끝나 실현 여부를 판정할 수 없음 (R3b 종료일 < 확인 스냅샷 기준일). `censored`와 구분한다. **실현율 분모에서 빼고 건수를 따로 보고한다** (2026-11-14 8차) |
 
 추적 기간은 `config/params.yaml`의 `signal_followup_months` (기본 3개월).
+
+**확인 스냅샷** (2026-11-15 사용자 결정): 예고 내용이 처음 반영된 스냅샷. 날짜는 비교하지 않는다. 금액(가격 예고, 집행정지 해제·인하)과 제품 유무(삭제 예고)는 발행 뒤 첫 반영 스냅샷을 쓰고, 반영되지 않았으면 신호 날짜 이후 첫 스냅샷(`signal_outcome.check_month_by_date`)에서 결과를 판정한다. 정지·복귀·등재 예고는 예고 내용이 날짜라 반영을 날짜 없이 볼 수 없어 신호 날짜 이후 첫 스냅샷 그대로다. STAY_RELEASE_PRICE 해제 금액도 같은 방식. 확인 스냅샷이 신호 날짜보다 앞설 수 있다 (확인까지 일수가 음수, 2023-04-08 가격 예고 2건 −7일).
 
 ## 4. 데이터 모델
 

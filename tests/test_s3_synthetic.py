@@ -82,6 +82,8 @@ B_ROWS = (
     + rows("700000220", ["2024-01", "2024-02", "2024-04", "2024-05", "2024-06"])
     # 그 달 파일에만 그 달 안 날짜의 가격 비고, 금액 = 그 달 상한금액 (이미 적용된 가격, 사용자 결정 2026-11-15)
     + rows("700000230", notes={"2024-04": "24.4.10., 90원"}, prices={m: 90.0 for m in M[3:]})
+    # 2월 파일의 4/10 예고가 3월 파일에 이미 금액으로 반영 (예고 내용이 처음 반영된 스냅샷 = 3월, 사용자 결정 2026-11-15)
+    + rows("700000240", notes={"2024-02": "24.4.10., 90원"}, prices={m: 90.0 for m in M[2:]})
 )
 S_ROWS = [subs("2024-02", "700000150", None)] + [subs(m, "700000010") for m in M]
 # 대체조제 비고에도 같은 예고 (P4). 비고(급여정지) 칸에 가격 예고는 드물지만 합치기 규칙 시험용
@@ -256,8 +258,8 @@ def _final_parts(c, cut, last):
         "select * exclude (src_file, src_row) from product_state_month order by product_code, list_month").fetchall()
     evq = ("select * exclude (exit_reversed, late_realization_of) from event_ledger where observed_month < ? order by event_id" if cut != last
            else "select * exclude (exit_reversed, late_realization_of) from event_ledger order by event_id")     # exit_reversed: 사후 분석용
-    sgq = ("select * exclude (realized_after_followup) from signal_outcome where check_month <= ? order by signal_id" if cut != last
-           else "select * exclude (realized_after_followup) from signal_outcome order by signal_id")
+    sgq = ("select * exclude (realized_after_followup, check_month_by_date) from signal_outcome where check_month <= ? order by signal_id" if cut != last
+           else "select * exclude (realized_after_followup, check_month_by_date) from signal_outcome order by signal_id")
     return psm, c.execute(evq, [cut] if cut != last else []).fetchall(), c.execute(sgq, [cut] if cut != last else []).fetchall()
 
 
@@ -311,3 +313,11 @@ def test_in_month_applied_price_note(con):
     assert sig(con, "700000230") == []
     assert ev(con, "700000230", "PRICE_CHANGE") == [("2024-04", D(2024, 4, 10), "note_benefit", "unsignaled", False, None, None)]
     assert con.execute("select in_month_dated from note_token where product_code = '700000230'").fetchall() == [(True,)]
+
+
+def test_signal_confirmed_at_first_reflected_snapshot(con):
+    """확인 스냅샷 = 예고 내용이 처음 반영된 스냅샷 (날짜 비교 없음, 사용자 결정 2026-11-15).
+    2월 발행 4/10·90원 예고, 3월 파일 금액 90 → 확인 3월, realized, 가격 변경 3월 signaled 유효일 4/10 (signal_confirmed)"""
+    r = con.execute("""select check_month, check_month_by_date, outcome from signal_outcome where product_code = '700000240'""").fetchall()
+    assert r == [("2024-03", "2024-05", "realized")]
+    assert ev(con, "700000240", "PRICE_CHANGE") == [("2024-03", D(2024, 4, 10), "signal_confirmed", "signaled", True, None, None)]

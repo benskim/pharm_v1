@@ -114,7 +114,8 @@ def build_a2(con) -> pd.DataFrame:
 def build_a2_buckets(con) -> pd.DataFrame:
     return con.execute("""select signal_type, case when lead_days <= 7 then '0-7' when lead_days <= 14 then '8-14' when lead_days <= 31 then '15-31'
                     when lead_days <= 62 then '32-62' else '63+' end lead_bucket,
-               case when confirm_lag_days <= 7 then '0-7' when confirm_lag_days <= 31 then '8-31' else '32+' end confirm_bucket, count(*) n
+               -- 확인 스냅샷이 신호 날짜보다 앞설 수 있다 (예고 내용이 먼저 반영된 스냅샷, 사용자 결정 2026-11-15) → '<0'
+               case when confirm_lag_days < 0 then '<0' when confirm_lag_days <= 7 then '0-7' when confirm_lag_days <= 31 then '8-31' else '32+' end confirm_bucket, count(*) n
         from signal_outcome where outcome in ('realized', 'realized_partial') group by all order by 1, 2, 3""").df()
 
 
