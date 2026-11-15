@@ -4,6 +4,17 @@
 
 다 채운 뒤 `make p1-s4-precision`을 실행하면 `precision.csv`가 나온다. `label_type_correct`가 하나라도 비어 있으면 계산하지 않는다.
 
+## 라벨 작성자 (`labeler`)
+| 칸 | 뜻 |
+|---|---|
+| `labeler` | `claude` (1차 라벨) / `user_reviewed` (사용자가 원자료와 대조해 검토한 행). 모든 행에 둘 중 하나 |
+| `claude_label_type_correct`, `claude_label_date_correct` | 1차 라벨. 1차에 `label_*`와 같은 값을 쓰고, 검토할 때는 **고치지 않는다** |
+| `label_type_correct`, `label_date_correct` | 최종 라벨. 검토에서 다르게 보면 이 칸을 고친다 |
+| `label_note` | 판정 근거 (어느 달·어느 목록의 비고·금액을 봤는지, N이면 무엇이 다른지) |
+
+검토 흐름: 행을 검토하면 `labeler`를 `user_reviewed`로 바꾸고, 1차와 판단이 다르면 `label_*`와 `label_note`를 고친다. 1차 라벨 없이 처음부터 채워도 된다 (그 행은 1차와 비교하지 않는다).
+`make p1-s4-precision`은 정밀도를 전체(all)와 검토한 행(user_reviewed)으로 따로 내고, 1차와 검토 라벨이 다른 행을 `label_review_diff.csv`에 쓴다.
+
 ## 라벨 3칸
 
 | 칸 | 뜻 | Y | N | 모름 |

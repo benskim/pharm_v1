@@ -3,8 +3,11 @@
 입력: outputs/validation/sample_60.csv
   label_type_correct  : Y / N / 모름 (기준은 outputs/validation/LABELING.md)
   label_date_correct  : Y / N / 모름, 날짜가 없는 행은 비움
-  label_note          : 메모 (선택)
-출력: outputs/validation/precision.csv (전체, record_type별, 층별, date_source별), 화면 출력
+  label_note          : 판정 근거
+  labeler             : claude (1차 라벨) / user_reviewed (사용자가 검토한 행)
+  claude_label_type_correct, claude_label_date_correct : 1차(claude) 라벨. 사용자가 검토하며 label_*를 고쳐도 남긴다
+출력: outputs/validation/precision.csv (전체, record_type별, 층별, date_source별) × scope(all / user_reviewed),
+      outputs/validation/label_review_diff.csv (1차 라벨과 검토 라벨이 다른 행), 화면 출력
 - 비가중 정밀도: Y / (Y + N). 모름과 빈칸은 분모에서 빼고 따로 센다.
 - 가중 정밀도: 층 크기(stratum_size)로 가중. 층 h의 라벨 행마다 가중치 N_h / n_h (n_h = 그 층의 Y·N 행 수).
   구간은 유효 표본 크기 n_eff = (Σw)² / Σw² (Kish)로 Wilson 95%.
@@ -80,6 +83,34 @@ def summarize(rows):
     return out
 
 
+LABELERS = {"claude", "user_reviewed"}
+LABELS = ("label_type_correct", "label_date_correct")
+
+
+def _norm(v):
+    v = (v or "").strip()
+    return v.upper() if v.upper() in YES | NO else v
+
+
+def review_diff(rows):
+    """user_reviewed 행에서 1차(claude_label_*)와 검토 라벨(label_*)이 다른 행. 1차 라벨이 없는 행은 비교하지 않는다.
+    → (비교한 행 수, 칸별 다른 수 dict, 다른 행 목록)"""
+    rev = [r for r in rows if (r.get("labeler") or "").strip() == "user_reviewed"
+           and any((r.get(f"claude_{lab}") or "").strip() for lab in LABELS)]
+    n_diff = {lab: 0 for lab in LABELS}
+    out = []
+    for r in rev:
+        d = [lab for lab in LABELS if _norm(r.get(f"claude_{lab}")) != _norm(r.get(lab))]
+        for lab in d:
+            n_diff[lab] += 1
+        if d:
+            out.append({"sample_id": r["sample_id"], "record_id": r.get("record_id", ""), "stratum": r["stratum"],
+                        "changed": "+".join(d),
+                        **{f"claude_{lab}": r.get(f"claude_{lab}", "") for lab in LABELS},
+                        **{lab: r.get(lab, "") for lab in LABELS}, "label_note": r.get("label_note", "")})
+    return len(rev), n_diff, out
+
+
 def main(path=None):
     path = Path(path) if path else ROOT / "outputs/validation/sample_60.csv"
     with path.open(encoding="utf-8") as f:
@@ -93,16 +124,37 @@ def main(path=None):
     if bad:
         print(f"Y / N / 모름이 아닌 라벨: sample_id {', '.join(sorted(set(bad)))}")
         return 1
-    res = summarize(rows)
+    has_labeler = any("labeler" in r for r in rows)
+    if has_labeler:
+        badl = [r["sample_id"] for r in rows if (r.get("labeler") or "").strip() not in LABELERS]
+        if badl:
+            print(f"labeler가 claude / user_reviewed가 아닌 행: sample_id {', '.join(badl[:20])}")
+            return 1
+    scopes = [("all", rows)]
+    if has_labeler:
+        scopes.append(("user_reviewed", [r for r in rows if r["labeler"].strip() == "user_reviewed"]))
+    res = [(sc, *x) for sc, rs in scopes for x in summarize(rs)]
     out = path.parent / "precision.csv"
     with out.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["group", "key", "label", "n", "correct", "unknown", "precision", "wilson_lo", "wilson_hi",
+        w.writerow(["scope", "group", "key", "label", "n", "correct", "unknown", "precision", "wilson_lo", "wilson_hi",
                     "precision_weighted", "weighted_lo", "weighted_hi", "n_eff"])
         w.writerows(res)
     for r in res:
-        if r[0] in ("all", "record_type", "date_source"):
+        if r[1] in ("all", "record_type"):
             print(r)
+    if has_labeler:
+        n_rev, n_diff, diff = review_diff(rows)
+        n_user = sum(1 for r in rows if r["labeler"].strip() == "user_reviewed")
+        print(f"labeler: claude {len(rows) - n_user}, user_reviewed {n_user} (그중 1차 라벨과 비교한 행 {n_rev})")
+        print(f"1차 라벨과 검토 라벨이 다른 행 {len(diff)} (type {n_diff['label_type_correct']}, date {n_diff['label_date_correct']})")
+        dpath = path.parent / "label_review_diff.csv"
+        cols = ["sample_id", "record_id", "stratum", "changed", *[f"claude_{l}" for l in LABELS], *LABELS, "label_note"]
+        with dpath.open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=cols)
+            w.writeheader()
+            w.writerows(diff)
+        print(f"→ {dpath}")
     print(f"→ {out}")
     return 0
 

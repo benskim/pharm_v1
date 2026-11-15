@@ -156,6 +156,7 @@
 | 2026-11-15 (S3 답변 반영) | `exit_reversed`·`realized_after_followup`은 뒤의 스냅샷에 따라 바뀌는 사후 컬럼이라 증분 시험(한 달씩 추가 = 한 번에)의 비교에서 뺀다 | 판정에 쓰지 않는 컬럼 | |
 | 2026-11-15 (S3 2차 반영) | `event_ledger.reason_source`(외부 근거 표시) 컬럼을 둔다. 외부 근거는 `config/external_evidence.yaml`의 `event` (조건: 관측월·유형·늦은 실현 신호의 발행 달, 기대 건수 62) | 신호와 같은 방식 | |
 | 2026-11-15 (S4 반영) | 가중 정밀도의 구간은 유효 표본 크기 n_eff = (Σw)²/Σw² (Kish)로 Wilson 95%를 계산한다. 가중치 = 층 크기 / 그 층의 라벨 행(Y·N) 수 | 가중 비율에 Wilson을 쓰는 간단한 방법 | 부트스트랩 |
-| 2026-11-15 (S4 반영) | A4 분모에 산정불가(unpriced) 제품을 넣고 있다 (reimbursed만이면 3개 묶음 분모 변화, 1개 묶음 대상 여부 변화). 사용자 확인 대기 | | reimbursed만 |
+| 2026-11-15 (S4 반영, **사용자 결정**) | A4 "절반 이상"의 분모는 발행 달 `state_asof = reimbursed`인 같은 성분 제품만 쓴다. 산정불가(unpriced)는 뺀다. 이전 기준(산정불가 포함)은 민감도 분석으로 함께 낸다 (분모가 바뀌는 묶음 3개, 대상 여부가 바뀌는 묶음 1개: 1838 2024-07-01 제외 1 → 대상) | 사용자 결정: 산정불가 제품은 상한금액이 없어 성분 단가에 기여하지 않는다 | reimbursed + unpriced (민감도) |
+| 2026-11-15 (S4 반영, 사용자 지시) | `sample_60.csv`에 `labeler`(claude / user_reviewed)와 1차 라벨 보존 칸 `claude_label_type_correct`·`claude_label_date_correct`를 둔다. 정밀도는 all / user_reviewed 두 범위로 내고, 1차와 검토 라벨이 다른 행을 `label_review_diff.csv`에 쓴다 | 지시는 `labeler`·`label_note`만 정했다. "1차 라벨과 검토 라벨이 다른 건수"를 세려면 1차 값을 따로 남겨야 해서 칸 2개를 더했다 | 검토 전 파일을 따로 보관해 비교 |
 | 2026-11-15 (S4 반영) | 라벨을 채운 `sample_60.csv`는 `make p1-s4`가 덮어쓰지 않고 `sample_60.new.csv`에 쓴다 | 라벨 손실 방지 | |
 

@@ -26,6 +26,8 @@ OUT = ROOT / "outputs/s4"
 VAL = ROOT / "outputs/validation"
 PARAMS = load_yaml("params.yaml")
 ROLE_KO = {"reference": "대조약", "bioequiv": "생동인정", None: "모름"}
+LABEL_COLS = ("labeler", "claude_label_type_correct", "claude_label_date_correct",
+              "label_type_correct", "label_date_correct", "label_note")
 MUST_INCLUDE = ["654700150"]                     # DECISIONS 2026-11-14 7차: S4 표본에 반드시 포함
 
 
@@ -133,11 +135,17 @@ def build_a3(con) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------- A4
-def build_a4(con) -> dict[str, pd.DataFrame]:
+A4_STATES = ("reimbursed",)                     # 사용자 결정 2026-11-15: 산정불가는 상한금액이 없어 성분 단가에 기여하지 않는다
+A4_STATES_SENS = ("reimbursed", "unpriced")      # 민감도: 이전 기준 (산정불가 포함)
+
+
+def build_a4(con, states: tuple[str, ...] = A4_STATES) -> dict[str, pd.DataFrame]:
+    """states: "절반 이상"의 분모에 넣는 발행 달 state_asof 값"""
+    st = ", ".join(f"'{x}'" for x in states)
     con.execute("""create or replace temp table _up as
         select month, c4, sum(claim_amt) amt, sum(claim_qty) qty, sum(claim_amt) / nullif(sum(claim_qty), 0) up
         from stg_usage where in_out = 'OUT' group by 1, 2""")
-    con.execute("""create or replace temp table _a4 as
+    con.execute(f"""create or replace temp table _a4 as
         with s as (select o.signal_id, o.product_code, l.market_c4 c4, l.signal_date, o.check_month, o.issued_month,
                           (select q.price_listed from product_state_month q where q.product_code = o.product_code and q.list_month = o.issued_month) p0,
                           (select q.price_listed from product_state_month q where q.product_code = o.product_code and q.list_month = o.check_month) p1
@@ -146,7 +154,7 @@ def build_a4(con) -> dict[str, pd.DataFrame]:
              g as (select c4, signal_date, check_month, min(issued_month) issued_month, count(*) n_sig,
                           avg(p1 / p0 - 1) list_chg from s group by 1, 2, 3),
              np as (select c4, list_month, count(*) n_prod from product_state_month
-                    where state_asof in ('reimbursed', 'unpriced') group by 1, 2)
+                    where state_asof in ({st}) group by 1, 2)
         select g.*, strftime(g.signal_date, '%Y-%m') d_month, np.n_prod, g.n_sig * 1.0 / np.n_prod share,
                (select prev_month from s3_cal c where c.list_month = strftime(g.signal_date, '%Y-%m')) d_prev
         from g left join np on np.c4 = g.c4 and np.list_month = g.issued_month""")
@@ -184,7 +192,24 @@ def build_a4(con) -> dict[str, pd.DataFrame]:
         t["moved_more_in"] = (t["up_chg_signal_month_pct"].abs() > t["up_chg_observed_month_pct"].abs()).map(
             {True: "signal_month", False: "observed_month"})
         tgt = tgt.merge(t[["c4", "signal_date", "ledger_closer", "moved_more_in"]], on=["c4", "signal_date"], how="left")
-    return {"a4_selection": steps, "a4_targets": tgt}
+    groups = con.execute("""select c4, signal_date, check_month, n_sig, n_prod, share, stage from _a4s""").df()
+    return {"a4_selection": steps, "a4_targets": tgt, "_groups": groups}
+
+
+def build_a4_with_sensitivity(con) -> dict[str, pd.DataFrame]:
+    """주 기준(reimbursed)과 민감도(reimbursed + unpriced)를 함께 내고, 분모·대상 여부가 다른 묶음을 비교한다."""
+    main = build_a4(con, A4_STATES)
+    sens = build_a4(con, A4_STATES_SENS)
+    key = ["c4", "signal_date", "check_month"]
+    cmp = main.pop("_groups").merge(sens.pop("_groups"), on=key + ["n_sig"], suffixes=("_main", "_sens"), how="outer")
+    diff = cmp[(cmp["n_prod_main"].fillna(-1) != cmp["n_prod_sens"].fillna(-1)) | (cmp["stage_main"] != cmp["stage_sens"])].copy()
+    diff["stage_changed"] = diff["stage_main"] != diff["stage_sens"]
+    diff["share_main"] = diff["share_main"].round(3)
+    diff["share_sens"] = diff["share_sens"].round(3)
+    diff = diff.sort_values(key).reset_index(drop=True)
+    return {"a4_selection": main["a4_selection"], "a4_targets": main["a4_targets"],
+            "a4_selection_sens_unpriced": sens["a4_selection"], "a4_targets_sens_unpriced": sens["a4_targets"],
+            "a4_denominator_diff": diff}
 
 
 # ---------------------------------------------------------------- A6
@@ -272,6 +297,8 @@ def build_sample(con, n_total: int = 60, seed: int | None = None) -> pd.DataFram
                          and b.list_month = c2.list_month and b.row_kind = 'product_candidate') as varchar), '없음'), ' | ' order by c2.list_month)
                 from s3_cal c2 where c2.mi between (select mi from s3_cal where list_month = m.look_month) - 2
                                                   and (select mi from s3_cal where list_month = m.look_month)) prices_3m,
+               -- 라벨 칸 (LABELING.md): labeler = claude(1차) / user_reviewed(사용자 검토). claude_label_* = 1차 라벨 보존용
+               '' labeler, '' claude_label_type_correct, '' claude_label_date_correct,
                '' label_type_correct, '' label_date_correct, '' label_note
         from m order by sample_id""").df()
     con.unregister("_pick")
@@ -285,7 +312,7 @@ def write_all(con) -> dict[str, pd.DataFrame]:
     tabs["a2_lag_buckets"] = build_a2_buckets(con)
     tabs["a2_snapshot_order"] = build_a2_snapshot_order(con)
     tabs["a3_not_realized"] = build_a3(con)
-    tabs.update(build_a4(con))
+    tabs.update(build_a4_with_sensitivity(con))
     tabs["a5_compare_by_year"] = con.execute("select * exclude (n_check) from s3_compare_by_year order by year, event_type").df()
     for name, df in tabs.items():
         _dump(df, OUT / f"{name}.csv")
@@ -293,7 +320,7 @@ def write_all(con) -> dict[str, pd.DataFrame]:
     target = VAL / "sample_60.csv"
     if target.exists():                             # 라벨을 채운 파일은 덮어쓰지 않는다
         old = pd.read_csv(target, dtype=str)
-        labs = [c for c in ("label_type_correct", "label_date_correct", "label_note") if c in old.columns]
+        labs = [c for c in LABEL_COLS if c in old.columns]
         if labs and old[labs].notna().any().any():
             target = VAL / "sample_60.new.csv"
             print(f"sample_60.csv에 라벨이 있어 덮어쓰지 않고 {target.name}에 썼다")
