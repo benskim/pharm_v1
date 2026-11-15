@@ -472,3 +472,12 @@ PLAN_P2 §2 특징표·§7 T3 완료 기준, STAGES T3, DECISIONS를 고쳤다: 
 
 **시험**: `make test` 121개 통과 (S2 59), `make check-sample` 차이 없음.
 
+---
+
+## 14. S3 중 수정 (2026-11-15)
+
+- **품목 연결 경로 2의 시점**: `product_state_month`의 `item_code`·`item_link_path`·`ob_link_path`·`ob_ref`·`ob_generic`과 오렌지북으로 채운 역할은 경로 2(②품목기준코드)를 제품이 대체조제 목록에 처음 실린 달부터만 쓴다. S3의 실데이터 증분 시험에서, 뒤 달에 처음 대체조제 목록에 실린 제품 7개의 품목 연결이 앞 달 행에 들어가 있었다 (2023-12 기준 비교에서 161행). 경로 1(code_map)은 그대로 모든 달.
+  - 바뀐 숫자: `role_source = orangebook` 1,157행(32개 제품) → 1,130행(29개), NULL 552,360행(15,348) → 552,387행(15,351). `role_conflict` 0 그대로. 연결률 표(`link_rate`, 제품 단위)는 그대로.
+- `product_state_month.resume_date` 추가 (월말 기준 정지가 끝난 첫 달의 복귀일. S3 RESUME 이벤트의 유효일). 77행.
+- `make p1-s2` 시험 59개 통과.
+

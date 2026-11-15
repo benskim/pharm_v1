@@ -81,6 +81,16 @@
 | 2026-11-14 (10차) | NOTE_RULES §3 규칙: 한 칸에 집행정지와 다른 처분 비고가 함께 있어도 집행정지가 어느 처분을 막는지는 비고로 알 수 없다. 같은 칸에 있다는 이유로 둘을 연결하지 않는다 | 2022-05 동아에스티 | 같은 칸이면 연결 |
 | 2026-11-14 (10차) | P2 T3: M3를 "M월 파일을 M월부터 사용"과 "M+1월부터 사용" 두 기준으로 돌려 차이를 보고한다. 앞의 것은 미래 정보가 섞인 비교용 상한, 결과로는 뒤의 것만 쓴다 (PLAN_P2 §7, STAGES T3) | 명목 기준일 | |
 | 2026-11-14 (11차) | 동아에스티 8월 급여정지에 대한 잠정 집행정지 날짜는 데이터의 비고 날짜 **2022-05-09**로 적는다. 10차에 적은 "5/10"은 기사 보도일이다 (S2 보고서 §12.5, NOTE_RULES §3, LIMITATIONS L5, DECISIONS 10차, `config/external_evidence.yaml` 고침) | 사용자 확인 | 기사 보도일 |
+| 2026-11-15 (S3 답변) | 미실현 가격 예고 77건의 사유 `price_kept_stay_note`는 그대로 둔다. 동아에스티 74건(2022-05, 예고 5/4)은 `reason_source = data+external`, 근거 medigatenews 2233088369 (122개 품목 약가인하 잠정 효력정지; 집행정지 날짜는 데이터 비고 2022-05-03, 기사는 보도일). 마더스제약 3건(2024-02, 예고 2024-03-01)은 품목·예고일·금액(스토엠정 116→105, 스토엠투엑스정 191→174, 레이본정 220→187)을 데이터와 대조해 모두 일치하여 `data+external`, 근거 dailypharm 19265·342239 (집행정지 날짜는 데이터 비고 2024-02-29). `config/external_evidence.yaml` price_signal, 기대 건수 74·3 | 사용자 결정, 데이터 대조 | |
+| 2026-11-15 (S3 답변) | 참고 컬럼 `signal_outcome.realized_after_followup`: 미실현 가격 예고가 확인 스냅샷 뒤에 예고 금액과 같은 상한금액으로 나타난 첫 달. outcome은 바꾸지 않는다 | | |
+| 2026-11-15 (S3 답변) | **일반 규칙: 전제 신호가 실현되지 않은 신호는 `moot`**, 실현율 분모에서 뺀다. `parent_signal_id`로 연결 (RESUME_SCHEDULED → 같은 제품·시작일의 SUSPEND_SCHEDULED). PLAN §3·§5 A1 | 동아에스티 복귀 예고 72건 | `not_realized` |
+| 2026-11-15 (S3 답변) | 퇴출 정의는 그대로 (사라진 시점에 판정, 돌아오면 `reentry`). 사후 분석용 `event_ledger.exit_reversed`(나중에 같은 제품코드로 돌아옴)를 둔다. 판정에 쓰지 않는다. A5 대조표에 퇴출을 전체와 `exit_reversed` 제외로 낸다 | | |
+| 2026-11-15 (S3 답변) | 금액이 다르게 실현된 가격 예고 4건의 유효일은 관측월 1일. 예고 날짜는 참고 컬럼 `event_ledger.notice_date`에 남긴다 (짝지은 신호가 있는 모든 이벤트에 채움) | | 예고 날짜 |
+| 2026-11-15 (S3 2차 답변) | 동아에스티 62건의 2024-08 가격 변경: 유효일(2024-08-01)과 분류(unsignaled 43 / stay_released 19) 그대로. 2022년 예고의 실현으로 연결하지 않는다. 사후 참고 컬럼 `event_ledger.late_realization_of`(그 2022년 신호의 id)를 둔다. 판정·증분 시험에 쓰지 않는다. `reason_source = data+external`, evidence에 dailypharm 14837 (서울고법 7/19 집행정지 기각, 112개 품목 8/1 인하; 7/19는 기사 날짜, 데이터에 해제 비고 없음) | 사용자 결정 | 2022 예고의 실현 |
+| 2026-11-15 (S3 2차 답변) | A5 대조표의 unsignaled 가격 변경을 전체와 `late_realization_of` 제외로 낸다 | | |
+| 2026-11-15 (S3 2차 답변) | NOTE_RULES §3, LIMITATIONS L7: 한 제품에 집행정지가 둘 겹치면 하나가 끝난 것을 비고로 알 수 없다 | 동아에스티 43개 제품의 2024-07·08 비고 | |
+| 2026-11-15 (S3 2차 답변) | **부모 신호가 `unverifiable`·`censored`면 자식 신호도 같은 값으로 둔다** (`moot`는 부모가 `not_realized`일 때만). 사용자 승인 | S3 답변 반영 때 Claude Code가 정한 것을 사용자가 승인 | 모두 moot |
+| 2026-11-15 (S3 3차 답변) | 보도의 112개 품목에 맞추려고 기준을 바꾸지 않는다 (제품코드 기준 유지). 기사는 인하 사유의 근거로만 쓰고 건수의 근거로 쓰지 않는다 (LIMITATIONS L7) | 데이터: 122개 중 2024-08 가격 변경 78 | 품목기준코드 기준 |
 
 ## 사용자가 정해야 하는 것 (단계별로 묻는다)
 
@@ -127,4 +137,18 @@
 | 2026-11-14 (9차 반영) | 외부 근거는 `config/external_evidence.yaml`(조건: 신호 달·유형·날짜, 기대 건수 23)로 둔다. 맞는 건수가 다르면 멈춘다. 링크 내용은 수집하지 않는다 (CLAUDE.md 외부 수집 금지) | 재현성, 조건이 데이터와 어긋나면 알 수 있게 | 제품코드 23개 나열 |
 | 2026-11-14 (9차 반영) | `s2_suspend_signal_check`에 `signal_type`, `source_rule`, `outcome`(realized / realized_partial / not_realized / unverifiable / censored), `date_gap_days`(확인된 비고 날짜 − 예고 날짜, 부호 있음), `event_effective_date`·`event_date_source`, `reason_source`, `evidence`를 둔다. 확인 스냅샷(신호 날짜 이후 첫 스냅샷) 기준이며 S3 `signal_outcome`으로 옮긴다 | | |
 | 2026-11-14 (9차 반영) | `snapshot_inventory.filename_revision_date`: 원본 파일명의 수정일(`_1.21.수정`). 판정에 쓰지 않는다 (보고·한계용). 연도는 기준일의 연도, 수정일 달이 기준일 달보다 6 넘게 크면 전년 | 명목 기준일 뒤 정보를 데이터로 찾는 근거 | |
+| 2026-11-15 (S3) | 신호 키 = (signal_type, 제품, 신호 날짜). 여러 달·두 목록에 보여도 신호 하나 (P4). `issued_month` = 처음 보인 달. `signal_id` = `type:제품:날짜`, `event_id` = `type:제품:관측월` (결정적) | 실현율 분모 중복 방지. 두 목록 합친 신호 48개, 여러 달에 보인 신호 25개 | 달마다 신호 |
+| 2026-11-15 (S3) | 확인 스냅샷 = 신호 날짜 이후 첫 스냅샷 (RESUME은 종료일 다음 날 이후). 결과는 확인 스냅샷에서 정한다. `censored` = 확인 스냅샷이 분석 끝까지 없음. `signal_followup_months`(3)는 월 스냅샷이라 확인 스냅샷이 항상 다음 달이어서 판정에 쓰이지 않는다 | F4 정의(다음 스냅샷)와 같다 | 3개월 안 아무 달 |
+| 2026-11-15 (S3) | PRICE_PENDING: 확인 스냅샷 금액 = 예고 금액이면 realized, 금액이 바뀌었지만 다르면 realized_partial(amount_gap), 그대로면 not_realized. 사유: delisted / suspended / `price_kept_stay_note`(집행정지 비고가 있고 가격 유지) / unpriced / `price_kept_note_remains` / `note_gone_price_kept`. **`price_kept_stay_note`는 관측만 적은 것이다. 집행정지가 그 예고를 막았다고 연결하지 않는다** (NOTE_RULES §3) | 2022-05 동아에스티 74건 등 77건 | 사유 "집행정지" |
+| 2026-11-15 (S3) | LISTING 신호는 발행 달 `state_asof`가 scheduled_listing이면 LISTING_SCHEDULED, 아니면 LISTING_NOTE_EXISTING (그 스냅샷까지의 정보). EXISTING은 이벤트를 만들지 않는다 | NOTE_RULES R1 | |
+| 2026-11-15 (S3) | RESUME_SCHEDULED: 시작일이 발행 시점에 미래였고 그 SUSPEND_SCHEDULED가 실현되지 않았으면 `not_realized`, 사유 `suspension_not_realized`. 그 밖은 확인 스냅샷에 제품이 있고 새 정지 비고가 없고 정지 상태가 아니면 realized | 일어나지 않은 정지의 복귀를 실현으로 세지 않는다 (2022-05 동아 72건) | realized |
+| 2026-11-15 (S3) | DELISTING_SCHEDULED: 확인 스냅샷에 제품이 없고 F7 퇴출 재분류가 `recode_transfer`가 아니면 realized | PLAN §3 | |
+| 2026-11-15 (S3) | 가격 변경의 짝 신호가 realized_partial(금액 다름)이면 유효일은 관측월 1일(snapshot_first), `signal_id`는 남긴다 | 유효일 규칙 1은 realized만. 금액이 다른 실현은 날짜도 확인되지 않았다 | 신호 날짜 |
+| 2026-11-15 (S3) | 창 시작 전에 시작한 정지·집행정지만 SUSPEND·STAY_START를 만들지 않는다. 창 첫 달(2022-01) 안의 날짜로 시작한 것은 이벤트를 만든다 (kind `window_first_month`) | 2022-01-19 정지, 2022-01-21 집행정지 7건 | 창 첫 달 전부 제외 |
+| 2026-11-15 (S3) | **퇴출은 다음 달에 없는 관측마다 F7로 분류한다** (나중에 다시 나타나도). 다시 나타나면 LISTING `reentry`(재분류 없음). 표본 구간 F7 재현 표(`s3_entry_exit_sample`)는 reference 정의(창 안 마지막 관측만 퇴출)로 만든다 | 그 시점에 알 수 없는 재등장으로 퇴출 종류가 바뀌지 않게 (증분 시험). 관측 공백 44건 | 마지막 관측만 퇴출, 공백은 gap_exit |
+| 2026-11-15 (S3) | **품목 연결 경로 2(②품목기준코드)는 제품이 대체조제 목록에 처음 실린 달부터만 쓴다** (`product_state_month.item_code`·`ob_*`·오렌지북 역할). 경로 1(code_map)은 2026 속성표로 모든 달에 쓴다. F7의 품목 연결은 reference와 같이 기간 전체의 연결을 쓴다 | 실데이터 증분 시험에서 7개 제품의 뒤 달 정보가 앞 달 행에 들어감 | 제품 단위 고정 |
+| 2026-11-15 (S3) | STAY_START 유효일 = 그 달 집행정지(R4) 날짜 중 가장 이른 것 (늦게 보인 날짜 포함). STAY_END 유효일 = 실현된 STAY_RELEASE_PRICE 신호 날짜 → 그 달 R5 날짜 → 관측월 1일. 같은 달의 가격 변경은 kind `stay_released`, 유효일은 STAY_END와 같다. 집행정지 이벤트는 STAY_RELEASE_PRICE 외의 신호와 짝짓지 않는다 | 9·10차 결정, NOTE_RULES §3 | |
+| 2026-11-15 (S3 답변 반영) | 전제 신호가 `unverifiable`·`censored`이면 자식 신호도 같은 값으로 둔다 (`moot`는 전제가 `not_realized`일 때만) | 판정할 수 없는 전제의 자식을 moot로 단정하지 않는다. 실데이터 0건 | 모두 moot |
+| 2026-11-15 (S3 답변 반영) | `exit_reversed`·`realized_after_followup`은 뒤의 스냅샷에 따라 바뀌는 사후 컬럼이라 증분 시험(한 달씩 추가 = 한 번에)의 비교에서 뺀다 | 판정에 쓰지 않는 컬럼 | |
+| 2026-11-15 (S3 2차 반영) | `event_ledger.reason_source`(외부 근거 표시) 컬럼을 둔다. 외부 근거는 `config/external_evidence.yaml`의 `event` (조건: 관측월·유형·늦은 실현 신호의 발행 달, 기대 건수 62) | 신호와 같은 방식 | |
 

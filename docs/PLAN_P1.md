@@ -44,7 +44,7 @@
 **신호 유형** (1차)
 | signal_type | 출처 비고 | 실현 판정 |
 |---|---|---|
-| `PRICE_PENDING` | R2 가격 예고 | 신호 날짜 이후 첫 스냅샷의 금액 = 예고 금액 |
+| `PRICE_PENDING` | R2 가격 예고 | 신호 날짜 이후 첫 스냅샷의 금액 = 예고 금액. 금액이 바뀌었지만 다르면 `realized_partial`. 그대로면 `not_realized`, 사유 delisted / suspended / `price_kept_stay_note`(관측만, 집행정지와 연결하지 않음) / `note_gone_price_kept` 등 (S3) |
 | `LISTING_SCHEDULED` | R1 등재 예정 (처음 관측된 제품) | 신호 날짜 이후 첫 스냅샷에 제품이 있고 정지·삭제가 아님 |
 | `LISTING_NOTE_EXISTING` | R1 등재 예정 (이미 급여 중인 제품) | 상태 변화 없음. 실현율 계산에서 따로 보고 |
 | `STAY_RELEASE_PRICE` | R5 집행정지 해제 및 인하 (U6 변형 포함) | 해제 후 첫 스냅샷의 인하 여부. 이벤트 쌍(STAY_END + PRICE_CHANGE)은 확인 뒤에 만든다 |
@@ -63,6 +63,7 @@
 | `realized_partial` | 실현됐지만 금액·날짜가 다름 (금액 차이와 날짜 차이를 기록) |
 | `not_realized` | 추적 기간 안에 실현되지 않음 (사유: 비고 사라짐·가격 유지 / 정지 / 삭제 / 집행정지) |
 | `censored` | 분석 끝(2025-12)까지 추적 기간이 차지 않음 |
+| `moot` | **전제 신호가 실현되지 않은 신호** (일반 규칙, 2026-11-15). 신호가 다른 신호의 실현을 전제할 때(`parent_signal_id`, 예: RESUME_SCHEDULED의 전제는 같은 제품·같은 시작일의 SUSPEND_SCHEDULED) 전제가 `not_realized`이면 `moot`. 전제가 `unverifiable`·`censored`이면 같은 값. **실현율 분모에서 빼고 건수를 따로 보고한다** |
 | `unverifiable` | 확인할 스냅샷이 오기 전에 신호의 기간이 끝나 실현 여부를 판정할 수 없음 (R3b 종료일 < 확인 스냅샷 기준일). `censored`와 구분한다. **실현율 분모에서 빼고 건수를 따로 보고한다** (2026-11-14 8차) |
 
 추적 기간은 `config/params.yaml`의 `signal_followup_months` (기본 3개월).
@@ -88,8 +89,10 @@ L2 원장
  ├ bridge_code_recode   옛 제품코드 → 새 제품코드 (목록정비전코드)
  ├ signal_ledger        signal_id, signal_type, source_rule, product_code, market_c4, issued_month,
  │                      signal_date, amount, source_list, raw
- ├ signal_outcome       signal_id, outcome, realized_month, lag_days, amount_gap, date_gap_days, reason, reason_source, evidence
- └ event_ledger         event_id, event_type, product_code, market_c4, observed_month,
+ ├ signal_outcome       signal_id, outcome, parent_signal_id, realized_month, lag_days, amount_gap, date_gap_days, reason, reason_source, evidence,
+ │                      realized_after_followup (참고: 미실현 가격 예고가 뒤에 예고 금액으로 나타난 첫 달, 판정에 쓰지 않음)
+ └ event_ledger         event_id, event_type, product_code, market_c4, observed_month, notice_date(참고), exit_reversed(사후 분석용),
+                        late_realization_of(사후 참고: 늦게 예고 금액이 된 미실현 가격 예고의 signal_id), reason_source(외부 근거 표시),
                         effective_date, effective_date_lo/hi, date_source, kind, signal_id, evidence
 
 L3 분석용
@@ -150,12 +153,12 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 ## 5. 분석
 
 ### A. 신호의 실현율과 시차 (본론)
-- **A1 실현율 표**: 신호 유형 × 연도별 신호 수, `realized` / `realized_partial` / `not_realized` / `censored` 건수와 비율. 실현율은 `censored`와 `unverifiable`을 뺀 분모로 계산하고(두 건수는 따로 적는다) Wilson 95% 구간을 붙인다. **실현율은 하나만 낸다** (출처별 실현율을 따로 내지 않는다). `not_realized` 건수는 `reason_source`(data / external / data+external)별로 따로 적는다 (10차). `DELISTING_SCHEDULED`(1건)는 실현율 없이 건수로만 보고한다.
+- **A1 실현율 표**: 신호 유형 × 연도별 신호 수, `realized` / `realized_partial` / `not_realized` / `censored` 건수와 비율. 실현율은 `censored`·`unverifiable`·`moot`를 뺀 분모로 계산하고(세 건수는 따로 적는다) Wilson 95% 구간을 붙인다. **실현율은 하나만 낸다** (출처별 실현율을 따로 내지 않는다). `not_realized` 건수는 `reason_source`(data / external / data+external)별로 따로 적는다 (10차). `DELISTING_SCHEDULED`(1건)는 실현율 없이 건수로만 보고한다.
   - **보조 표**: 분해는 대조약 / 생동인정 / 모름 (`product_role` = `reference` / `bioequiv` / NULL). 역할 근거가 대체조제 목록에 실린 제품에만 충분히 있으므로 본 표에 넣지 않는다. 표 앞에 역할별 제품 수와 비율을 연도별·삭제 여부별·`role_source`별로 적는다. `role_conflict` 제품을 포함한 결과를 쓰고, 뺀 결과와의 차이를 한 줄로 적는다. "대조약 = 오리지널"로 쓰지 않는다.
 - **A2 시차 분포**: 신호 발행 월 → 신호 날짜 → 실현 확인 스냅샷. 일수 분포와 "몇 번째 스냅샷에서 확인됐나".
 - **A3 실현되지 않은 신호**: 사유별 건수와 사례 표. 숨기지 않는다.
 - **A4 사용통계 검증**: 실현된 가격 신호에서 성분 원외 단가(청구금액 ÷ 청구수량)가 (a) 신호 날짜가 속한 달과 (b) 스냅샷 관측월 중 언제 움직였는지 비교한다. 월중 적용은 `exposure_frac`으로 부분 월 변화까지 맞는지 본다. 대상은 성분 내 제품의 절반 이상이 같은 신호를 가진 경우로 한정하고, 대상 수·제외 수(비공개로 빠진 성분 포함)를 먼저 보고한다.
-- **A5 원장 대 스냅샷 차이 방식 대조표**: 유형별 이벤트 건수, 날짜가 달라진 건수, 종류가 달라진 건수, 시행 전·급여정지로 빠진 활성 제품 수. 연도별.
+- **A5 원장 대 스냅샷 차이 방식 대조표**: 유형별 이벤트 건수, 날짜가 달라진 건수, 종류가 달라진 건수, 시행 전·급여정지로 빠진 활성 제품 수. 연도별. 퇴출 건수는 전체와 `exit_reversed`(나중에 같은 제품코드로 돌아옴) 제외 두 가지로 낸다. 비고 없는 가격 변경(unsignaled)은 전체와 `late_realization_of` 제외 두 가지로 낸다.
 - **A6 수작업 검증**: 층화 표본 60건 (층: `date_source` × `signal_type`/`kind`, 연도 분산). 사용자가 원자료와 대조해 라벨을 채운다. 정밀도와 Wilson 95% 구간. **654700150(2024-01, 대체조제 목록에만 남은 정지 비고)은 반드시 넣는다** (2026-11-14 7차).
 
 ### B. 시장 반응 (축소판)

@@ -47,6 +47,7 @@ class MonthOut:
     resume_unconfirmed: bool = False
     listing_date: dt.date | None = None
     suspend_date: dt.date | None = None
+    resume_date: dt.date | None = None                # 월말 기준 정지가 끝난 첫 달: 급여가 다시 시작된 날
     intervals: list = field(default_factory=list)      # 정지 구간 (lo, hi, 정지 시작일)
     note: str | None = None
     # 기준일 시점 (asof)
@@ -213,6 +214,13 @@ def derive(months: list[str], base: dict[str, dt.date], toks: dict[str, set[Tok]
             ends = [st for lo, hi, st in o.intervals if hi == me]
             o.suspended = bool(ends)
             o.suspend_date = min(ends) if ends else None
+    prev = False
+    for m in months:                                   # 정지(월말) 다음 행이 정지가 아니면 그 행에 복귀일
+        o = out[m]
+        if prev and not o.suspended:
+            ms, _ = month_bounds(m)
+            o.resume_date = max(hi for lo, hi, _ in o.intervals) + ONE if o.intervals else ms
+        prev = o.suspended
 
     # ---- R1: 등재 예정 (처음 관측된 달부터 이어진 행만)
     sched = []

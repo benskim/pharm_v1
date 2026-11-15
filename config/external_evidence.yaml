@@ -21,3 +21,33 @@ suspend_signal:
     evidence:
       - https://dailypharm.com/user/news/39450
       - https://www.dailypharm.com/user/news/33781
+
+# 가격 예고 (PRICE_PENDING) 미실현 사유의 외부 근거 (사용자 결정 2026-11-15). 사유(price_kept_stay_note)는 바꾸지 않고
+# reason_source = data+external, evidence = 데이터 근거 + 외부 메모·링크. 조건에 맞는 건수가 expected_count와 다르면 멈춘다.
+price_signal:
+  - id: donga_2022_05_price
+    match: {issued_month: "2022-05", signal_date: "2022-05-04", reason: "price_kept_stay_note"}
+    expected_count: 74
+    reason_source: data+external
+    note: "동아에스티(주) 122개 품목 약가인하에 대한 잠정 효력정지. 집행정지 날짜는 데이터 비고 2022-05-03 (기사 보도일 2022-05-04)"
+    evidence:
+      - https://medigatenews.com/news/2233088369
+  - id: mothers_2024_03_price
+    match: {issued_month: "2024-02", signal_date: "2024-03-01", reason: "price_kept_stay_note"}
+    product_codes: ["622802320", "622804240", "622802960"]   # 스토엠정 116→105, 스토엠투엑스정 191→174, 레이본정 220→187 (대조 일치)
+    expected_count: 3
+    reason_source: data+external
+    note: "(주)마더스제약 3개 품목 집행정지 인용 (2025-01-31까지). 집행정지 날짜는 데이터 비고 2024-02-29 (기사 보도일 2024-03-04). 2심에서 인하 처분 취소 (2026-09-08 보도, 분석 기간 밖)"
+    evidence:
+      - https://dailypharm.com/user/news/19265
+      - https://dailypharm.com/user/news/342239
+
+# 이벤트의 외부 근거 (사용자 결정 2026-11-15). 이벤트의 유효일·분류는 바꾸지 않는다. reason_source = data+external, evidence에 링크.
+event:
+  - id: donga_2024_08_price
+    match: {event_type: "PRICE_CHANGE", observed_month: "2024-08", late_realization_issued_month: "2022-05"}
+    expected_count: 62
+    reason_source: data+external
+    note: "동아에스티(주) 2022-05 약가인하의 2024-08 적용. 서울고법 집행정지 기각 2024-07-19는 기사 날짜(참고, 데이터에 해제 비고 없음), 112개 품목 8/1부터 인하 (2024-07-24 보도)"
+    evidence:
+      - https://www.dailypharm.com/user/news/14837

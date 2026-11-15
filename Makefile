@@ -47,7 +47,12 @@ p1-s2:
 	$(PY) -m pbd.ledger.s2_state
 	$(PY) -m pytest -q tests/test_state_rules.py tests/test_s2_synthetic.py tests/test_s2_integration.py
 
-p1-s3 p1-s4 p1-s5 p1-s6 p1-s7:
+# P1 S3: 신호·이벤트 원장 → signal_ledger, signal_outcome, event_ledger (data/interim/pbd.duckdb), 표 outputs/s3/
+p1-s3:
+	$(PY) -m pbd.ledger.s3_ledger
+	$(PY) -m pytest -q tests/test_s3_synthetic.py tests/test_s3_integration.py
+
+p1-s4 p1-s5 p1-s6 p1-s7:
 	$(TODO)
 
 report:

@@ -53,19 +53,19 @@ def build_state_override(con) -> None:
         res = derive(months_by[pc], cal, toks[pc], last_month)
         for m, o in res.items():
             rows.append((pc, m, o.scheduled, o.suspended, o.exposure_frac, o.exposure_revised, o.state_revised,
-                         o.late_note_revised, o.resume_unconfirmed, o.listing_date, o.suspend_date, o.note,
+                         o.late_note_revised, o.resume_unconfirmed, o.listing_date, o.suspend_date, o.resume_date, o.note,
                          o.asof_scheduled, o.asof_suspended, o.asof_suspend_date))
     df = pd.DataFrame(rows, columns=["product_code", "list_month", "scheduled", "suspended", "exposure_frac",
                                      "exposure_revised", "state_revised", "late_note_revised", "resume_unconfirmed",
-                                     "listing_date", "suspend_date", "rule_note",
+                                     "listing_date", "suspend_date", "resume_date", "rule_note",
                                      "asof_scheduled", "asof_suspended", "asof_suspend_date"])
-    for c in ("listing_date", "suspend_date", "asof_suspend_date"):
+    for c in ("listing_date", "suspend_date", "resume_date", "asof_suspend_date"):
         df[c] = pd.to_datetime(df[c])
     con.register("_ov", df)
     con.execute("""create or replace table s2_state_override as
         select product_code, list_month, scheduled, suspended, cast(exposure_frac as double) exposure_frac,
                exposure_revised, state_revised, late_note_revised, resume_unconfirmed, cast(listing_date as date) listing_date,
-               cast(suspend_date as date) suspend_date, rule_note, asof_scheduled, asof_suspended,
+               cast(suspend_date as date) suspend_date, cast(resume_date as date) resume_date, rule_note, asof_scheduled, asof_suspended,
                cast(asof_suspend_date as date) asof_suspend_date from _ov order by 1, 2""")
     con.unregister("_ov")
 
@@ -96,14 +96,15 @@ def build_bridges(con) -> None:
                           bool_or(ob_generic) filter (where path = 'substitute' and in_orangebook) gen2,
                           min(item_code) filter (where path = 'code_map') item1,
                           min(item_code) filter (where path = 'substitute') item2
-                   from l group by 1)
-        select product_code, coalesce(item1, item2) item_code,
+                   from l group by 1),
+             sf as (select product_code, min(first_month) sub_first_month from bridge_product_item where path = 'substitute' group by 1)
+        select product_code, coalesce(item1, item2) item_code, item1, item2, ref1, gen1, ref2, gen2, sf.sub_first_month,
                case when item1 is not null then 'code_map' when item2 is not null then 'substitute' end item_link_path,
                item_code_map, item_substitute, ob_code_map, ob_substitute,
                case when ob_code_map then 'code_map' when ob_substitute then 'substitute' end ob_link_path,
                case when ob_code_map then ref1 when ob_substitute then ref2 end ob_ref,
                case when ob_code_map then gen1 when ob_substitute then gen2 end ob_generic
-        from p order by 1""")
+        from p left join sf using (product_code) order by 1""")
     con.execute("""create or replace table bridge_code_recode as
         with r as (select prev_code old_code, product_code new_code, 'benefit' src, list_month from stg_benefit
                    where prev_code is not null and row_kind = 'product_candidate' and prev_code <> product_code
@@ -146,6 +147,17 @@ def build_product_state_month(con) -> None:
         with cal as (select list_month, min(base_date) base_date,
                             lead(list_month) over (order by list_month) next_month from stg_benefit group by 1),
              b as (select * from stg_benefit where row_kind = 'product_candidate'),
+             -- 품목·오렌지북 연결 (제품×월): 경로 1(code_map, 2026 속성표)은 모든 달, 경로 2(②품목기준코드)는
+             -- 제품이 대체조제 목록에 처음 실린 달부터만 쓴다 (그 전에는 알 수 없는 정보)
+             lkm as (select b.product_code, b.list_month,
+                            coalesce(k.item1, case when k.sub_first_month <= b.list_month then k.item2 end) item_code,
+                            case when k.item1 is not null then 'code_map'
+                                 when k.sub_first_month <= b.list_month and k.item2 is not null then 'substitute' end item_link_path,
+                            case when k.ob_code_map then 'code_map'
+                                 when k.sub_first_month <= b.list_month and k.ob_substitute then 'substitute' end ob_link_path,
+                            case when k.ob_code_map then k.ref1 when k.sub_first_month <= b.list_month and k.ob_substitute then k.ref2 end ob_ref,
+                            case when k.ob_code_map then k.gen1 when k.sub_first_month <= b.list_month and k.ob_substitute then k.gen2 end ob_generic
+                     from b join s2_product_link k using (product_code)),
              -- 다음 달 급여목록에 같은 제품이 있는가 (list_month = 이번 달)
              bn as (select b.product_code, c.list_month, true has_next from b join cal c on c.next_month = b.list_month),
              s as (select product_code, list_month, ref_drug, bioeq, bioeq_raw, equiv, item_code sub_item_code,
@@ -181,6 +193,7 @@ def build_product_state_month(con) -> None:
                coalesce(ov.resume_unconfirmed, false) resume_unconfirmed,
                ov.listing_date, case when ov.suspended then ov.suspend_date end suspend_date,
                case when ov.asof_suspended then ov.asof_suspend_date end asof_suspend_date,
+               ov.resume_date,
                case when coalesce(tk.has_r7, false) and b.price is null then 'note+price_null'
                     when coalesce(tk.has_r7, false) then 'note' when b.price is null then 'price_null' end unpriced_evidence,
                case when cal.next_month is not null then bn.has_next is null end absent_next_month,
@@ -204,7 +217,7 @@ def build_product_state_month(con) -> None:
         left join tk using (product_code, list_month)
         left join pp using (product_code, list_month)
         left join s2_state_override ov using (product_code, list_month)
-        left join s2_product_link lk using (product_code)""")
+        left join lkm lk using (product_code, list_month)""")
     # product_role_carried: 그 달 대체조제 값 → 없으면 과거 달의 대체조제 값(앞으로만 이어 씀) → 오렌지북 공고대조약
     con.execute("""create or replace table product_state_month as
         with c as (select *, last_value(sub_role ignore nulls) over (partition by product_code order by list_month
