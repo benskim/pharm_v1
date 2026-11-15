@@ -60,7 +60,12 @@ p1-s4:
 p1-s4-precision:
 	$(PY) -I scripts/s4_precision.py
 
-p1-s5 p1-s6 p1-s7:
+# P1 S5: 분석 B·C (B1 전가율, B2 진입 군집, C 대체조제 그룹) → outputs/s5/
+p1-s5:
+	$(PY) -m pbd.ledger.s5_market
+	$(PY) -m pytest -q tests/test_s5.py
+
+p1-s6 p1-s7:
 	$(TODO)
 
 report:
