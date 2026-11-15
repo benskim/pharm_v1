@@ -313,6 +313,9 @@ def build_event_ledger(con) -> None:
         r5 as (select product_code, list_month, min(token_date) d, bool_or(in_benefit) b from _tok
                where token_type = 'R5' and not is_future group by 1, 2),
         r4 as (select product_code, list_month, token_date d, bool_or(in_benefit) b from _tok where token_type = 'R4' group by 1, 2, 3),
+        -- 집행정지 비고가 사라진 파일에 함께 처음 나타난 가격 예고가 실현됨 → STAY_END 유효일 = 예고일 (사용자 결정 2026-11-15, 전체 14건)
+        sp as (select o.product_code, l.issued_month, min(o.signal_id) signal_id, min(o.signal_date) signal_date from signal_outcome o
+               join signal_ledger l using (signal_id) where o.signal_type = 'PRICE_PENDING' and o.outcome = 'realized' group by 1, 2),
         ev_stay(event_type, product_code, observed_month, kind, effective_date, date_source, signal_id, lo, hi, evidence) as (
             select 'STAY_START', r.product_code, r.list_month, case when r.list_month = '{first_m}' then 'window_first_month' when r.prev_row_month is null then 'at_entry' else 'in_window' end,
                    r.stay_date, case when r4.b then 'note_benefit' else 'note_substitute' end, null, null, null, null
@@ -321,11 +324,12 @@ def build_event_ledger(con) -> None:
               and (r.prev_row_month is null or not r.adj_prev or not r.prev_stay)
             union all
             select 'STAY_END', r.product_code, r.list_month, case when s.signal_id is not null or r5.d is not null then 'released' else 'note_gone' end,
-                   coalesce(s.signal_date, r5.d, r.first_day),
+                   coalesce(s.signal_date, r5.d, sp.signal_date, r.first_day),
                    case when s.signal_id is not null then 'signal_confirmed' when r5.d is not null then case when r5.b then 'note_benefit' else 'note_substitute' end
-                        else 'snapshot_first' end, s.signal_id, null, null, null
+                        when sp.signal_id is not null then 'signal_confirmed' else 'snapshot_first' end, coalesce(s.signal_id, sp.signal_id), null, null, null
             from _rows r left join sr s on s.product_code = r.product_code and s.check_month = r.list_month
             left join r5 on r5.product_code = r.product_code and r5.list_month = r.list_month
+            left join sp on sp.product_code = r.product_code and sp.issued_month = r.list_month
             where r.adj_prev and r.prev_stay and not r.stay_flag),
         -- 급여정지 (state_eom). 창 첫 달에 이미 정지면 SUSPEND 없음
         ss as (select product_code, signal_id, signal_date, outcome, event_effective_date, event_date_source from signal_outcome
@@ -416,7 +420,7 @@ def build_event_ledger(con) -> None:
                case when a.event_type = 'PRICE_CHANGE' then (select min(o.signal_id) from signal_outcome o
                          where o.signal_type = 'PRICE_PENDING' and o.product_code = a.product_code
                            and o.realized_after_followup = a.observed_month) end late_realization_of,
-               cast(null as varchar) reason_source
+               cast(null as varchar) reason_source, cast(null as varchar) reason_external
         from allv a
         order by observed_month, event_type, product_code""")
 
@@ -429,16 +433,24 @@ def apply_external_event(con) -> None:
         return
     for e in load_yaml("external_evidence.yaml").get("event", []):
         m = e["match"]
-        cond = """event_type = ? and observed_month = ? and late_realization_of in
-                  (select signal_id from signal_ledger where issued_month = ?)"""
-        args = [m["event_type"], m["observed_month"], m["late_realization_issued_month"]]
+        cond, args = "event_type = ? and observed_month = ?", [m["event_type"], m["observed_month"]]
+        if "late_realization_issued_month" in m:
+            cond += " and late_realization_of in (select signal_id from signal_ledger where issued_month = ?)"
+            args.append(m["late_realization_issued_month"])
+        if e.get("product_codes"):
+            cond += " and product_code in (" + ", ".join("?" for _ in e["product_codes"]) + ")"
+            args += list(e["product_codes"])
         n = con.execute(f"select count(*) from event_ledger where {cond}", args).fetchone()[0]
         if n == 0:
             continue
         assert n == e["expected_count"], (e["id"], n, e["expected_count"])
         ext = e["note"] + " | " + " ; ".join(e["evidence"])
-        con.execute(f"""update event_ledger set reason_source = ?, evidence = '데이터: ' || coalesce(evidence, '') || ' / 외부: ' || ?
-                        where {cond}""", [e["reason_source"], ext, *args])
+        if "cause" in e:        # 외부 원인은 reason_external (evidence는 데이터 근거 그대로, 2026-11-15 방식)
+            con.execute(f"""update event_ledger set reason_source = 'data+external', reason_external = ? where {cond}""",
+                        [e["cause"] + ": " + ext, *args])
+        else:
+            con.execute(f"""update event_ledger set reason_source = ?, evidence = '데이터: ' || coalesce(evidence, '') || ' / 외부: ' || ?
+                            where {cond}""", [e["reason_source"], ext, *args])
 
 
 def build_compare(con) -> None:

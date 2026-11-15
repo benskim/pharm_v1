@@ -102,28 +102,43 @@ def build_a1(con) -> dict[str, pd.DataFrame]:
 
 
 # ---------------------------------------------------------------- A2·A3
+# A2 (사용자 결정 2026-11-15): 확인 스냅샷이 신호 날짜보다 앞선 경우(confirm_lag_days < 0, 예고 금액이 신호 날짜가 속한 달
+# 파일에 이미 실림)는 "같은 달 반영"으로 따로 센다. 일수 분포는 같은 달 반영 건을 빼고 낸다.
+SAME_MONTH = "confirm_lag_days < 0"
+
+
 def build_a2(con) -> pd.DataFrame:
-    return con.execute("""select signal_type, count(*) n,
-               min(lead_days) lead_min, quantile_cont(lead_days, 0.1) lead_p10, median(lead_days) lead_median,
-               quantile_cont(lead_days, 0.9) lead_p90, max(lead_days) lead_max,
-               min(confirm_lag_days) confirm_min, median(confirm_lag_days) confirm_median, max(confirm_lag_days) confirm_max,
-               count(*) filter (where check_month = (select c.next_month from s3_cal c where c.list_month = o.issued_month)) checked_next_snapshot
+    return con.execute(f"""select signal_type, count(*) filter (where not ({SAME_MONTH})) n,
+               count(*) filter (where {SAME_MONTH}) same_month_reflected,
+               min(lead_days) filter (where not ({SAME_MONTH})) lead_min,
+               quantile_cont(lead_days, 0.1) filter (where not ({SAME_MONTH})) lead_p10,
+               median(lead_days) filter (where not ({SAME_MONTH})) lead_median,
+               quantile_cont(lead_days, 0.9) filter (where not ({SAME_MONTH})) lead_p90,
+               max(lead_days) filter (where not ({SAME_MONTH})) lead_max,
+               min(confirm_lag_days) filter (where not ({SAME_MONTH})) confirm_min,
+               median(confirm_lag_days) filter (where not ({SAME_MONTH})) confirm_median,
+               max(confirm_lag_days) filter (where not ({SAME_MONTH})) confirm_max,
+               count(*) filter (where not ({SAME_MONTH}) and check_month = (select c.next_month from s3_cal c where c.list_month = o.issued_month)) checked_next_snapshot
         from signal_outcome o where outcome in ('realized', 'realized_partial') group by 1 order by 1""").df()
 
 
 def build_a2_buckets(con) -> pd.DataFrame:
-    return con.execute("""select signal_type, case when lead_days <= 7 then '0-7' when lead_days <= 14 then '8-14' when lead_days <= 31 then '15-31'
+    """일수 구간 (같은 달 반영 건 제외)"""
+    return con.execute(f"""select signal_type, case when lead_days <= 7 then '0-7' when lead_days <= 14 then '8-14' when lead_days <= 31 then '15-31'
                     when lead_days <= 62 then '32-62' else '63+' end lead_bucket,
-               -- 확인 스냅샷이 신호 날짜보다 앞설 수 있다 (예고 내용이 먼저 반영된 스냅샷, 사용자 결정 2026-11-15) → '<0'
-               case when confirm_lag_days < 0 then '<0' when confirm_lag_days <= 7 then '0-7' when confirm_lag_days <= 31 then '8-31' else '32+' end confirm_bucket, count(*) n
-        from signal_outcome where outcome in ('realized', 'realized_partial') group by all order by 1, 2, 3""").df()
+               case when confirm_lag_days <= 7 then '0-7' when confirm_lag_days <= 31 then '8-31' else '32+' end confirm_bucket, count(*) n
+        from signal_outcome where outcome in ('realized', 'realized_partial') and not ({SAME_MONTH}) group by all order by 1, 2, 3""").df()
 
 
 def build_a2_snapshot_order(con) -> pd.DataFrame:
-    """발행 스냅샷 뒤 몇 번째 스냅샷에서 확인됐나 (1 = 바로 다음 스냅샷)"""
-    return con.execute("""select o.signal_type, ci.mi - ii.mi snapshots_after_issue, count(*) n
+    """확인 스냅샷 순서: 같은 달 / 다음 스냅샷 / 2번째 / 3번째 … (발행 스냅샷 기준)"""
+    df = con.execute(f"""select o.signal_type, ({SAME_MONTH}) same_month, ci.mi - ii.mi k, count(*) n
         from signal_outcome o join s3_cal ii on ii.list_month = o.issued_month join s3_cal ci on ci.list_month = o.check_month
-        where o.outcome in ('realized', 'realized_partial') group by all order by 1, 2""").df()
+        where o.outcome in ('realized', 'realized_partial') group by all""").df()
+    df["confirm_snapshot"] = [("같은 달" if sm else "다음 스냅샷" if k == 1 else f"{k}번째") for sm, k in zip(df["same_month"], df["k"])]
+    df["sort_key"] = [-1 if sm else k for sm, k in zip(df["same_month"], df["k"])]
+    df = df.groupby(["signal_type", "confirm_snapshot", "sort_key"], as_index=False)["n"].sum()
+    return df.sort_values(["signal_type", "sort_key"]).reset_index(drop=True)[["signal_type", "confirm_snapshot", "n"]]
 
 
 def build_a3(con) -> pd.DataFrame:

@@ -84,6 +84,9 @@ B_ROWS = (
     + rows("700000230", notes={"2024-04": "24.4.10., 90원"}, prices={m: 90.0 for m in M[3:]})
     # 2월 파일의 4/10 예고가 3월 파일에 이미 금액으로 반영 (예고 내용이 처음 반영된 스냅샷 = 3월, 사용자 결정 2026-11-15)
     + rows("700000240", notes={"2024-02": "24.4.10., 90원"}, prices={m: 90.0 for m in M[2:]})
+    # 집행정지 비고가 사라진 파일(3월)에 가격 예고가 함께 처음 나타나고 4월에 실현 → STAY_END 유효일 = 예고일 (사용자 결정 2026-11-15)
+    + rows("700000250", notes={"2024-01": "집행정지(23.6.1.)", "2024-02": "집행정지(23.6.1.)", "2024-03": "24.3.15., 80원"},
+           prices={m: 80.0 for m in M[3:]})
 )
 S_ROWS = [subs("2024-02", "700000150", None)] + [subs(m, "700000010") for m in M]
 # 대체조제 비고에도 같은 예고 (P4). 비고(급여정지) 칸에 가격 예고는 드물지만 합치기 규칙 시험용
@@ -321,3 +324,10 @@ def test_signal_confirmed_at_first_reflected_snapshot(con):
     r = con.execute("""select check_month, check_month_by_date, outcome from signal_outcome where product_code = '700000240'""").fetchall()
     assert r == [("2024-03", "2024-05", "realized")]
     assert ev(con, "700000240", "PRICE_CHANGE") == [("2024-03", D(2024, 4, 10), "signal_confirmed", "signaled", True, None, None)]
+
+
+def test_stay_end_dated_by_price_notice_in_same_file(con):
+    """3월 파일에서 집행정지 비고가 사라지고 가격 예고 3/15·80원이 처음 나타남, 4월 80원 실현:
+    STAY_END 관측월 3월 유지, 유효일 3/15, date_source = signal_confirmed, 짝지은 신호 있음. 가격 변경 4월 signaled 3/15"""
+    assert ev(con, "700000250", "STAY_END") == [("2024-03", D(2024, 3, 15), "signal_confirmed", "note_gone", True, None, None)]
+    assert ev(con, "700000250", "PRICE_CHANGE") == [("2024-04", D(2024, 3, 15), "signal_confirmed", "signaled", True, None, None)]

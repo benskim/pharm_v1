@@ -137,9 +137,15 @@ def test_unverifiable_separate_from_censored(con):
 
 
 def test_stay_events_not_linked_to_other_dispositions(con):
-    """집행정지 이벤트는 STAY_RELEASE_PRICE 신호만 짝짓는다 (NOTE_RULES §3: 어느 처분을 막는지 비고로 연결하지 않음)"""
+    """집행정지 이벤트는 STAY_RELEASE_PRICE 신호만 짝짓는다 (NOTE_RULES §3). 예외 (사용자 결정 2026-11-15): 집행정지 비고가
+    사라진 파일에 함께 처음 나타난 가격 예고가 실현된 STAY_END는 그 예고와 짝짓고 유효일 = 예고일 (14건: 레오파마 7, 자렐토 4, 리트모놈SR 3)"""
     assert con.execute("""select count(*) from event_ledger e join signal_ledger l using (signal_id)
-                          where e.event_type in ('STAY_START', 'STAY_END') and l.signal_type <> 'STAY_RELEASE_PRICE'""").fetchone()[0] == 0
+                          where e.event_type in ('STAY_START', 'STAY_END') and l.signal_type <> 'STAY_RELEASE_PRICE'
+                            and not (e.event_type = 'STAY_END' and l.signal_type = 'PRICE_PENDING' and l.issued_month = e.observed_month
+                                     and e.effective_date = l.signal_date)""").fetchone()[0] == 0
+    r = con.execute("""select e.observed_month, e.effective_date, count(*) from event_ledger e join signal_ledger l using (signal_id)
+                       where e.event_type = 'STAY_END' and l.signal_type = 'PRICE_PENDING' group by 1, 2 order by 1""").fetchall()
+    assert r == [("2022-07", dt.date(2022, 7, 15), 7), ("2022-08", dt.date(2022, 8, 22), 4), ("2023-08", dt.date(2023, 8, 13), 3)]
 
 
 def test_pre_window_states_have_no_start_events(con):

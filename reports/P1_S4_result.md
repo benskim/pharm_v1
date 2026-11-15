@@ -104,7 +104,7 @@ unverifiable 0, censored 0 (S3 보고서 §9.2).
 
 | 신호 유형 | 실현 | 발행 → 신호 날짜 (일) 중앙값 [p10–p90] (범위) | 신호 날짜 → 확인 스냅샷 (일) 중앙값 (범위) | 확인 스냅샷 (발행 뒤 몇 번째) |
 |---|---|---|---|---|
-| PRICE_PENDING | 4,599 | 30 [29–30] (1–66) | 0 (−7–29) | 1번째 4,596, 2번째 3 |
+| PRICE_PENDING | 4,597 (+ 같은 달 반영 2) | 30 [29–30] (1–61) | 0 (0–29) | 같은 달 2, 다음 스냅샷 4,596, 2번째 1 |
 | LISTING_SCHEDULED | 342 | 8 [5–25] (1–25) | 22 (6–30) | 1번째 342 |
 | LISTING_NOTE_EXISTING | 10 | 22 | 8 | 1번째 10 |
 | SUSPEND_SCHEDULED | 78 | 7 [7–59] (3–59) | 23 (0–28) | 1번째 67, 2번째 11 |
@@ -372,6 +372,53 @@ labeler claude 57 / user_reviewed 4, label_source raw 59 / external 2. 1차와 �
 | 시험 | 합성 시험 추가 (`test_signal_confirmed_at_first_reflected_snapshot`: 2월 발행 4/10 예고가 3월 금액에 반영 → 확인 3월, 유효일 4/10). 증분 시험에서 `check_month_by_date`(뒤 스냅샷에 따라 정해지는 참고 칸)를 비교에서 뺐다. `make test` 187개 통과, `make check-sample` 차이 없음 |
 
 결정 3·4는 사용자가 인터넷 검색 뒤 반영한다 (대기).
+
+## 11. 5차 반영 (2026-11-15)
+
+### 11.1 STAY_END 14건 (집행정지 비고가 사라진 파일에 가격 예고가 함께 나타난 경우)
+결정: STAY_END 유효일 = 가격 예고일 (관측월 유지, `date_source = signal_confirmed`, 짝지은 신호 = 그 가격 예고). 먼저 검증했다.
+
+| 관측월 | 제품 (데이터) | 예고일 | 외부 자료 | 결과 |
+|---|---|---|---|---|
+| 2022-07 | 레오파마(유) 7품목: 626700011 다이보넥스연고, 626700111·112 프로토픽연고0.1%, 626700121·**122** 프로토픽연고0.03%, 626700131 트라보코트크림, 626700141 트라보겐크림 | 7/15 | 1심 패소 후 항소 포기, 7개 품목 7/15부터 인하 ([Dailypharm 영문 2022-07-18](https://www.dailypharm.com/eng/user/news/4046)) | **확인**. 품목 수 7 일치, 21행(626700122) 포함, 기사상 시행일 = 예고일 |
+| 2022-08 | 바이엘코리아 자렐토정 2.5·10·15·20mg (641105810·641104870·641105740·641105730) | 8/22 | 서울고법 복지부 승소로 집행정지 해제, 22일부터 인하 ([데일리팜 2022-08-11](https://www.dailypharm.com/user/news/37357)) | **확인**. 4품목·8/22 일치 |
+| 2023-08 | 한국애보트 리트모놈SR서방캡슐 225·325·425mg (644206320·330·340) | 8/13 | 2022-07-15부터 고등법원 집행정지 인용(위 영문 기사, 데이터 `집행정지(22.7.15.)`와 같음). 2023-08 해제 경위·시행일 기사는 찾지 못함 | **제품·업체만 확인, 해제·시행일 미확인** |
+
+- 예고일과 기사상 시행일이 다른 건: **없다** (확인된 11건 모두 같음). 리트모놈SR 3건은 비교할 기사가 없다.
+- 확인된 11건은 `event_ledger.reason_external`에 출처 URL (`config/external_evidence.yaml`). 새 칸 `event_ledger.reason_external`.
+- 바뀐 이벤트 14 (STAY_END 유효일 7/1·8/1 → 예고일). A5: 날짜가 다른 STAY_END 2022 1 → 12, 2023 0 → 3. 표본 행은 바뀌지 않았다 (21행은 PRICE_CHANGE).
+- 시험: 합성 `test_stay_end_dated_by_price_notice_in_same_file`, 통합 `test_stay_events_not_linked_to_other_dispositions`(예외 14건 = 7/7·4/4·3/3과 날짜 대조). NOTE_RULES §3에 예외를 적었다.
+
+### 11.2 7행 (645604500 대화로자탄정) 삭제 날짜
+결정: 원장 유효일 = 목록에서 사라진 구간(2024-12-02 ~ 2025-01-01), 라벨 Y 유지.
+
+| 날짜 | 출처 | 결과 |
+|---|---|---|
+| 허가 2024-11-29 **취하** (업체 자진) | 의약품안전나라 품목 상세 ([nedrug 201500533](https://nedrug.mfds.go.kr/pbp/CCBBB01/getItemDetail?itemSeq=201500533)): 취소/취하 구분 "취하", 일자 2024-11-29, 대화제약(주), 위탁제조 알리코제약(주) | **확인**. 마스터의 "취소일자" 칸 값은 실제로 취하일이다 |
+| 급여 삭제 2025-07-01 | health.kr ([대화로자탄정](https://www.health.kr/drug/2015020200023)). 복지부 고시 원문·병협·심평원 공지는 찾지 못함 | **health.kr 단일 출처, 미확인** |
+
+- 두 날짜를 `event_ledger.reason_external`에 적었다. LIMITATIONS L4에 "허가 취소·취하 등으로 목록 이탈이 고시 삭제일보다 먼저 올 수 있다", BACKLOG X9(같은 모양이 삭제 exit 층에 얼마나 있는지, S6 과제).
+
+### 11.3 A2 표시 (사용자 결정 A)
+확인까지 일수가 음수인 건(확인 스냅샷이 신호 날짜보다 앞섬)은 **같은 달 반영**으로 따로 센다. 가격 예고 2건(646902211·646902221).
+
+| 신호 유형 | 확인 스냅샷 순서 |
+|---|---|
+| PRICE_PENDING | 같은 달 2 / 다음 스냅샷 4,596 / 2번째 1 |
+| SUSPEND_SCHEDULED | 다음 스냅샷 67 / 2번째 11 |
+| RESUME_SCHEDULED | 3번째 1 / 4번째 6 / 6번째 2 / 8번째 1 / 11번째 1 |
+| LISTING_SCHEDULED / LISTING_NOTE_EXISTING / STAY_RELEASE_PRICE / DELISTING_SCHEDULED | 다음 스냅샷 342 / 10 / 1 / 1 |
+
+일수 분포(`a2_lag.csv`, `a2_lag_buckets.csv`)는 같은 달 반영 건을 뺐다: 가격 예고 4,597건, 발행 → 신호 날짜 최대 66 → 61일, 확인까지 일수 최솟값 −7 → 0. 음수 구간은 없앴다.
+
+### 11.4 P2 사후 칸 금지 (사용자 결정 B)
+`src/pbd/ledger/posthoc.py`: 금지 칸 (signal_outcome의 확인 달·`check_month_by_date`·실현 달·확인까지 일수·금액/날짜 차이·`realized_after_followup`, signal_ledger의 `last_seen_month`·`n_months_seen`, event_ledger의 `exit_reversed`·`late_realization_of`, product_state_month의 월말 상태·고쳐 쓴 칸). 신호 결과(outcome)는 시점 조건(확인 달 < origin)으로만. PLAN_P2·DECISIONS에 적었다. 시험 `tests/test_p2_posthoc.py`: P2 특징 코드(`src/pbd/forecast/`, `market_month`를 다루는 파일)가 이 칸을 읽으면 실패. 지금은 P2 코드가 없어 검사 대상 0개이고, 검사 함수는 손으로 만든 SQL로 시험했다.
+
+### 11.5 시험
+`make test` 190개 통과 (97초), `make check-sample` 차이 없음 (S1 표본 시험 3개 통과).
+
+### 11.6 직접 검토용 문서
+`outputs/validation/review10_evidence.md` (생성 `scripts/build_review10.py`): 10행(28, 29, 31, 7, 9, 16, 22, 35, 2, 59), 판정·의견·label_note 없이 원본 값만. 행마다 ledger_claim, 기준 달 앞뒤 1개월 포함 3개월의 급여목록·대체조제 원본 행(파일 경로, 원본 파일명, 제품코드, 업체명, 제품명, 주성분코드, 품목기준코드, 상한금액, 비고 원문), 원본에 행이 없는 달. 7·9·16·59행은 같은 품목기준코드와 같은 주성분코드+같은 업체의 다른 제품코드 행 (59행: 668101450 한국산도스 2024-10. 7·16행: 해당 없음. 9행: 품목기준코드 없음).
 
 ## 확인 필요 (처음 보고)
 1. **실현율 표의 주 지표**: realized_partial을 포함한 실현율(정지 예고 38.4%)과 엄격 실현율(19.2%) 중 무엇을 리포트(S6)와 요약에서 앞에 둘까요?
