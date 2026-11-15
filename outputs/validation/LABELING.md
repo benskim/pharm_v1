@@ -72,3 +72,9 @@
 | 21 | Y/Y 유지 | user_reviewed / raw | 외부 확인(항소 포기로 집행정지 종료, 7/15 인하, Dailypharm 2022-07-18). signaled와 stay_released가 겹치면 규칙상 signaled. STAY_END:626700122:2022-07 있음 (누락 아님) |
 | 25, 44 | 날짜 모름 → Y | user_reviewed / external | 보건복지부 고시 제2025-187호(2025.11.20.), 대한병원협회 보험 제2025-423호, 시행일 2025.11.20. (`docs/evidence/보험_제2025-423_1_고시.pdf`) |
 | 51 | 유형 모름 → Y | user_reviewed / raw | 원장 수정: 주장이 `not_realized / stay` → `not_realized / note_gone`. 외부 원인은 `reason_external` |
+| 28·29·31 | Y/Y 유지 | user_reviewed / raw | 비고에 별도 예고 날짜가 없으므로 시행일은 인하 금액이 기록된 달의 1일 (`review10_evidence.md`로 검토) |
+| 7·9 | Y/Y 유지 | user_reviewed / raw | 목록에서 빠진 달의 1일이 시행일 = 원장 구간의 끝 날짜 |
+| 16 | Y/Y 유지 | user_reviewed / raw | 목록에 등록된 달의 1일이 시행일 |
+| 22·35 | Y/Y 유지 | user_reviewed / raw | 예고일이 있어 그날 시행 |
+| 2 | Y/(비움→Y) | user_reviewed / raw | 업체명만 다름: 양도양수가 아니라 회사 이름 개명 |
+| 59 | Y/Y 유지 | user_reviewed / raw | 같은 품목, 함량 표기 방식만 바뀜 (6.39mg 에스시탈로프람옥살산염 실제 질량 = 5mg 에스시탈로프람 환산 질량) |
