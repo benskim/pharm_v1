@@ -207,4 +207,4 @@ LISTING, DELISTING, PRICE_CHANGE (kind: signaled / unsignaled / stay_released), 
 1. `data/raw/` 배치 (`docs/DATA.md` §1).
 2. S0에서 나온 새 비고 문형의 규칙 결정.
 3. S4의 60건 라벨링.
-4. `생동인정여부(공고번호)` 괄호 숫자의 의미 확인. 확인 전에는 ○ 여부만 쓴다.
+4. ~~`생동인정여부(공고번호)` 괄호 숫자의 의미 확인. 확인 전에는 ○ 여부만 쓴다.~~ **완료 (2026-11-16)**: 식약처 생동인정품목 목록의 순번. 키·시점 비교에 쓰지 않고 ○ 여부만 쓴다 (`DATA.md` §3, `DECISIONS.md`).
