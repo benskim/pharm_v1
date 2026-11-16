@@ -404,7 +404,9 @@ def events_this_month(con, month: str) -> pd.DataFrame:
                e.effective_date, e.effective_date_lo, e.effective_date_hi, e.date_source, e.evidence,
                r.same_code_remaining, r.same_c4_remaining, round(b.base_amt / 1e8, 2) base_amt, nc.n n_products_c4,
                -- 제품 1개 몫 (근사) = 성분4 원외 금액 / 성분4 reimbursed 제품 수 (F1과 같은 제품 수 비중 근사)
-               round(b.base_amt / nullif(nc.n, 0) / 1e8, 3) product_share
+               round(b.base_amt / nullif(nc.n, 0) / 1e8, 3) product_share,
+               -- 이름 보조: 제품 자신의 주성분코드 표시 이름 (성분4 제품이 이번 달에 하나도 남지 않은 경우)
+               ig.base_name ing_base_name, ig.n_components ing_n_components
         from event_ledger e join s3_cal k on k.list_month = e.observed_month
         left join (select c4, count(*) n from product_state_month where list_month = ? and state_asof = 'reimbursed' group by 1) nc
                on nc.c4 = e.market_c4
@@ -412,6 +414,7 @@ def events_this_month(con, month: str) -> pd.DataFrame:
         left join product_state_month p0 on p0.product_code = e.product_code and p0.list_month = k.prev_month
         left join _c4name n on n.c4 = e.market_c4 left join _c4grp g on g.c4 = e.market_c4
         left join _rem r on r.product_code = e.product_code left join _base b on b.c4 = e.market_c4
+        left join _ingname ig on ig.ingredient_code = r.ingredient_code
         where e.observed_month = ? order by e.event_type, e.kind, e.market_c4, e.product_code""", [month, month]).df()
     return df
 
@@ -756,7 +759,8 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
             if len(ex):
                 def _tops(x):
                     tf = x.groupby("firm").size().reset_index(name="n").sort_values(["n", "firm"], ascending=[False, True]).head(5)
-                    ti = x.assign(nm=x["c4"].map(sn).fillna("")).groupby(["c4", "nm"]).size().reset_index(name="n") \
+                    nm = [sn.get(c) or short_name(b, k) for c, b, k in zip(x["c4"], x["ing_base_name"], x["ing_n_components"])]
+                    ti = x.assign(nm=nm).groupby(["c4", "nm"]).size().reset_index(name="n") \
                         .sort_values(["n", "c4"], ascending=[False, True]).head(5)
                     return (", ".join(f"{_name(r.firm)} {r.n}" for r in tf.itertuples()),
                             ", ".join(f"{r.nm or r.c4} ({r.c4}) {r.n}" for r in ti.itertuples()))
