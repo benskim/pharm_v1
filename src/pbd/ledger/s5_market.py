@@ -77,19 +77,23 @@ def build_b1_pairs(con) -> pd.DataFrame:
                      where e.event_type = 'PRICE_CHANGE' and day(e.effective_date) <> 1),
              -- 구성 변화: 그 관측월에 성분 안의 진입·퇴출·양도양수·정지·복귀 이벤트
              comp as (select market_c4 c4, observed_month as month, count(*) n_comp from event_ledger
-                      where event_type in ('LISTING', 'DELISTING', 'TRANSFER', 'SUSPEND', 'RESUME') group by 1, 2)
+                      where event_type in ('LISTING', 'DELISTING', 'TRANSFER', 'SUSPEND', 'RESUME') group by 1, 2),
+             -- 등재·삭제만 (B1 대조군 좁힌 기준선, 사용자 결정 2026-11-16)
+             ld as (select market_c4 c4, observed_month as month, count(*) n_ld from event_ledger
+                    where event_type in ('LISTING', 'DELISTING') group by 1, 2)
         select p.*, c.m0 prev_month,
                coalesce(u0.observed_out, false) obs0, coalesce(u1.observed_out, false) obs1,
                (select count(*) from usage_c4_month z where z.c4 = p.c4 and z.observed_out) n_obs_months,
                ln(q1.up / q0.up) dlog_up, q0.amt amt0, q1.amt amt1,
-               mid.c4 is not null mid_month_change, coalesce(comp.n_comp, 0) n_comp
+               mid.c4 is not null mid_month_change, coalesce(comp.n_comp, 0) n_comp, coalesce(ld.n_ld, 0) n_listing_delisting
         from pairs p join cal c on c.m1 = p.month
         left join usage_c4_month u0 on u0.c4 = p.c4 and u0.month = c.m0
         left join usage_c4_month u1 on u1.c4 = p.c4 and u1.month = p.month
         left join _up q0 on q0.c4 = p.c4 and q0.month = c.m0
         left join _up q1 on q1.c4 = p.c4 and q1.month = p.month
         left join mid on mid.c4 = p.c4 and mid.month = p.month
-        left join comp on comp.c4 = p.c4 and comp.month = p.month""")
+        left join comp on comp.c4 = p.c4 and comp.month = p.month
+        left join ld on ld.c4 = p.c4 and ld.month = p.month""")
     df = con.execute("select * from _b1 order by c4, month").df()
     stage = np.select(
         [df["n_basket"] == 0,
@@ -100,6 +104,71 @@ def build_b1_pairs(con) -> pd.DataFrame:
     df["stage"] = stage
     df["usage_never_observed"] = df["n_obs_months"] == 0
     df["year"] = df["month"].str[:4]
+    return df
+
+
+def effective_month_prices(con) -> pd.DataFrame:
+    """제품×달의 '유효일 기준' 목록가: 그 달 일수 가중 평균 상한금액.
+
+    기본값은 그 달 스냅샷 상한금액(관측월 기준과 같다). PRICE_CHANGE 이벤트(관측월 o, 유효일 e, 직전 스냅샷 금액 b → o의 금액 a)마다
+    - e가 o보다 앞 달이면: e의 달 ~ o 전달의 각 달에서 max(e, 그 달 1일)부터 말일까지를 a로 본다 (그 달 스냅샷 금액이 b일 때만)
+    - e가 o 안이고 1일이 아니면: o의 1일 ~ e 전날을 b로 본다
+    판매량이 아니라 달력 일수로 나눈다. exposure_frac(급여 일수 비율, 사후 칸)은 쓰지 않는다."""
+    psm = con.execute("""select product_code, list_month, c4, state_asof, price_listed from product_state_month""").df()
+    ev = con.execute("""select e.product_code, e.observed_month o, e.effective_date e, b.price_listed b, a.price_listed a
+        from event_ledger e join s3_cal k on k.list_month = e.observed_month
+        join product_state_month a on a.product_code = e.product_code and a.list_month = e.observed_month
+        join product_state_month b on b.product_code = e.product_code and b.list_month = k.prev_month
+        where e.event_type = 'PRICE_CHANGE' and a.price_listed > 0 and b.price_listed > 0""").df()
+    psm["p_eff"] = psm["price_listed"].astype(float)
+    idx = psm.set_index(["product_code", "list_month"]).index
+    pos = pd.Series(range(len(psm)), index=idx)
+    months = sorted(psm["list_month"].unique())
+    for r in ev.itertuples(index=False):
+        e = pd.Timestamp(r.e)
+        o0 = pd.Timestamp(r.o + "-01")
+        if e < o0:
+            for m in months:
+                ms = pd.Timestamp(m + "-01")
+                if ms < e.replace(day=1) or ms >= o0:
+                    continue
+                k = (r.product_code, m)
+                if k not in pos.index:
+                    continue
+                i = pos[k]
+                if psm.at[i, "price_listed"] != r.b:
+                    continue
+                dim = ms.days_in_month
+                frac = (dim - (max(e, ms) - ms).days) / dim       # a가 적용된 일수 비율
+                psm.at[i, "p_eff"] = r.b * (1 - frac) + r.a * frac
+        elif e > o0 and e.strftime("%Y-%m") == r.o:
+            i = pos[(r.product_code, r.o)]
+            frac_before = (e - o0).days / o0.days_in_month
+            psm.at[i, "p_eff"] = r.b * frac_before + r.a * (1 - frac_before)
+    return psm
+
+
+def b1_effective_pairs(con, pairs: pd.DataFrame) -> pd.DataFrame:
+    """관측월 기준 쌍(build_b1_pairs)의 목록 변화를 유효일 기준(일수 가중 평균 상한금액)으로 바꾼 값.
+    바구니(두 달 모두 reimbursed, 금액 있음)와 원외 단가는 그대로. stage_eff_daywt: 월 중간 변경을 일수로 나눠 넣는다 (제외 4 없음).
+    stage_eff_excl_mid: 같은 목록 변화에 관측월 기준의 제외 4(월 중간 적용 변경)를 그대로 둔다."""
+    psm = effective_month_prices(con)
+    con.register("_peff", psm[["product_code", "list_month", "c4", "state_asof", "p_eff"]])
+    x = con.execute("""with cal as (select prev_month m0, list_month m1 from s3_cal where prev_month is not null)
+        select a.c4, c.m1 as month,
+               avg(ln(b.p_eff / a.p_eff)) dlog_list_eff,
+               count(*) filter (where abs(ln(b.p_eff / a.p_eff)) > 1e-12) n_changed_eff
+        from cal c join _peff a on a.list_month = c.m0
+        join _peff b on b.list_month = c.m1 and b.product_code = a.product_code and b.c4 = a.c4
+        where a.state_asof = 'reimbursed' and b.state_asof = 'reimbursed' and a.p_eff > 0 and b.p_eff > 0
+        group by 1, 2""").df()
+    con.unregister("_peff")
+    df = pairs.merge(x, on=["c4", "month"], how="left")
+    df["n_changed_eff"] = df["n_changed_eff"].fillna(0).astype(int)
+    base = [df["n_basket"] == 0, ~(df["obs0"] & df["obs1"]) | df["dlog_up"].isna(), df["n_changed_eff"] == 0]
+    df["stage_eff_daywt"] = np.select(base, ["1_no_basket", "2_usage_unobserved", "3_no_list_change"], default="target")
+    df["stage_eff_excl_mid"] = np.select(base + [df["mid_month_change"]],
+                                         ["1_no_basket", "2_usage_unobserved", "3_no_list_change", "4_mid_month_change"], default="target")
     return df
 
 
@@ -139,7 +208,117 @@ def b1_summary(pairs: pd.DataFrame, seed: int) -> tuple[pd.DataFrame, pd.DataFra
     return st, pd.DataFrame(rows)
 
 
+def weighted_quantile(v: np.ndarray, w: np.ndarray, q: float) -> float:
+    """가중 분위수: 정렬한 값의 누적 가중치가 q 이상이 되는 첫 값"""
+    o = np.argsort(v)
+    v, w = v[o], w[o]
+    c = np.cumsum(w) / w.sum()
+    return float(v[np.searchsorted(c, q)])
+
+
+EXCL_ORDER = [("usage_unobserved", "전월 또는 그 달 원외 사용통계 미관측"),
+              ("no_basket", "두 달 모두 reimbursed이고 금액이 있는 제품 없음"),
+              ("no_list_change", "목록 가격이 바뀐 제품 없음 (x = 0)"),
+              ("mid_month_change", "월 중간 적용 가격 변경"),
+              ("target", "대상")]
+
+
+def b1_main(df: pd.DataFrame, basis: str, subset: str = "all") -> tuple[pd.DataFrame, pd.DataFrame]:
+    """B1 주 지표(사용자 결정 2026-11-16 [1]). df: 쌍 표, 칸 stage, x, y, amt1, obs0, obs1.
+    - 같은 방향 비율, 쌍별 비율 y/x 중앙값과 사분위 (|x| 1% 이상)
+    - 대조군: 같은 단계를 통과했지만 목록 가격이 바뀌지 않은 쌍(stage 3). 대상 쌍 i마다 대조군에서
+      (가) y의 부호가 x_i와 같은 비율, (나) |x_i| 이상 오른 비율, |x_i| 이상 내린 비율, x_i 방향으로 |x_i| 이상 움직인 비율을 구해 평균한다
+    - 원외 금액(그 달) 가중 같은 방향 비율, 가중 비율 중앙값
+    반환: (지표 표, 제외 내역표)"""
+    t = df[df["stage"] == "target"]
+    ctl = df[df["stage"] == "3_no_list_change"]["y"].to_numpy()
+    x, y, w = t["x"].to_numpy(), t["y"].to_numpy(), t["amt1"].to_numpy()
+    same = np.sign(y) == np.sign(x)
+    big = np.abs(x) >= np.log(1.01)
+    r = y[big] / x[big]
+    cs = np.sort(ctl)
+    n = len(cs)
+    ge = lambda a: n - np.searchsorted(cs, a, side="left")          # 대조군 y >= a 개수
+    le = lambda a: np.searchsorted(cs, a, side="right")             # 대조군 y <= a 개수
+    p_pos, p_neg, p_zero = (cs > 0).mean(), (cs < 0).mean(), (cs == 0).mean()
+    exp_sign = np.where(x < 0, p_neg, p_pos).mean()
+    up_ge = np.array([ge(abs(v)) for v in x]) / n
+    dn_ge = np.array([le(-abs(v)) for v in x]) / n
+    exp_size = np.where(x < 0, dn_ge, up_ge).mean()
+    tgt_size = (same & (np.abs(y) >= np.abs(x))).mean()
+    rows = [
+        ("pairs", "대상 쌍", len(t)), ("c4s", "대상 성분", t["c4"].nunique()),
+        ("share_same_sign", "같은 방향 비율", same.mean()),
+        ("pairs_ratio", "비율 계산 쌍 (|x| 1% 이상)", int(big.sum())),
+        ("ratio_median", "쌍별 비율 y/x 중앙값", np.median(r)),
+        ("ratio_q25", "비율 1사분위", np.quantile(r, 0.25)), ("ratio_q75", "비율 3사분위", np.quantile(r, 0.75)),
+        ("ctl_pairs", "대조군 쌍 (목록 변화 없음, 원외 두 달 관측)", n),
+        ("ctl_share_up", "대조군: 원외 단가 오름", p_pos), ("ctl_share_down", "대조군: 내림", p_neg), ("ctl_share_flat", "대조군: 그대로", p_zero),
+        ("ctl_expected_same_sign", "대조군 기준선: 대상 x와 같은 부호 비율 (쌍별 평균)", exp_sign),
+        ("share_same_sign_ge_size", "대상: x 방향으로 |x| 이상 움직인 비율", tgt_size),
+        ("ctl_share_up_ge_size", "대조군: |x_i| 이상 오른 비율 (쌍별 평균)", up_ge.mean()),
+        ("ctl_share_down_ge_size", "대조군: |x_i| 이상 내린 비율 (쌍별 평균)", dn_ge.mean()),
+        ("ctl_expected_same_sign_ge_size", "대조군 기준선: x_i 방향으로 |x_i| 이상 (쌍별 평균)", exp_size),
+        ("w_share_same_sign", "원외 금액 가중 같은 방향 비율", (w * same).sum() / w.sum()),
+        ("w_ratio_median", "원외 금액 가중 비율 중앙값 (|x| 1% 이상)", weighted_quantile(r, w[big], 0.5)),
+    ]
+    main = pd.DataFrame([{"basis": basis, "subset": subset, "metric": k, "label": lab, "value": round(float(v), 4)} for k, lab, v in rows])
+    # 제외 내역: 사용통계 미관측을 먼저 떼고, 나머지를 사유별로 (서로 겹치지 않음, 합 100%)
+    unobs = ~(df["obs0"] & df["obs1"]) | df["y"].isna()
+    cat = np.select([unobs, df["n_basket"] == 0, df["stage"] == "3_no_list_change", df["stage"] == "4_mid_month_change"],
+                    [k for k, _ in EXCL_ORDER[:4]], default="target")
+    vc = pd.Series(cat).value_counts()
+    ex = pd.DataFrame([{"basis": basis, "category": k, "label": lab, "pairs": int(vc.get(k, 0)),
+                        "c4s": df.loc[cat == k, "c4"].nunique(), "share_pct": round(vc.get(k, 0) / len(df) * 100, 2)}
+                       for k, lab in EXCL_ORDER])
+    return main, ex
+
+
+# ---------------------------------------------------------------- 비공개 규칙 대조 (관찰, 규칙은 바꾸지 않음)
+def disclosure_detail(con) -> dict[str, pd.DataFrame]:
+    """목록 업체 수(reimbursed)와 원외 관측의 불일치 두 묶음.
+    - 업체 3곳 이상인데 원외 미관측: 그 성분×월 reimbursed 제품의 투여 경로(주성분코드 7번째 글자 B = 주사)로 나누고, 원내 관측 여부
+    - 업체 2곳 이하인데 원외 관측: 건수와 예시만 (원인은 추측하지 않는다)"""
+    con.execute("""create or replace temp table _disc as
+        with l as (select c4, list_month as month, count(distinct firm) nf, count(*) np,
+                          count(*) filter (where substr(ingredient_code, 7, 1) = 'B') n_inj
+                   from product_state_month where state_asof = 'reimbursed' group by 1, 2)
+        select l.*, case when n_inj = np then 'injection_only' when n_inj > 0 then 'injection_mixed' else 'non_injection' end route_group,
+               coalesce(z.observed_out, false) obs_out, coalesce(z.observed_any, false) and not coalesce(z.observed_out, false) obs_in_only
+        from l left join usage_c4_month z using (c4, month)""")
+    ge3 = con.execute("""select route_group, count(*) c4_months, count(distinct c4) c4s,
+               count(*) filter (where obs_in_only) in_observed, round(avg(obs_in_only::int), 3) share_in_observed
+        from _disc where nf >= 3 and not obs_out group by 1 order by 1""").df()
+    ex_ge3 = con.execute("""select * from (select d.route_group, d.c4, d.month, d.nf, d.np, d.obs_in_only,
+               (select min(b.ingredient_name) from stg_benefit b where b.c4 = d.c4 and b.list_month = d.month and b.ingredient_name is not null) ingredient_name,
+               row_number() over (partition by route_group order by hash(d.c4 || d.month)) rn
+        from _disc d where nf >= 3 and not obs_out) where rn <= 5 order by route_group, rn""").df()
+    le2 = con.execute("""select d.c4, d.month, d.nf, d.np,
+               (select min(b.ingredient_name) from stg_benefit b where b.c4 = d.c4 and b.list_month = d.month and b.ingredient_name is not null) ingredient_name
+        from _disc d where nf <= 2 and obs_out order by hash(d.c4 || d.month) limit 5""").df()
+    n_le2 = con.execute("select count(*), count(distinct c4) from _disc where nf <= 2 and obs_out").fetchone()
+    le2.insert(0, "total_c4_months", n_le2[0])
+    le2.insert(1, "total_c4s", n_le2[1])
+    return {"b_disclosure_ge3_unobserved": ge3, "b_disclosure_ge3_examples": ex_ge3, "b_disclosure_le2_observed": le2}
+
+
 # ---------------------------------------------------------------- B2
+def b2_scope(cl: pd.DataFrame) -> pd.DataFrame:
+    """B2 사례 표 밖 군집의 관측 범위 (관측 = 3개월 모두 원외 관측). 사후 창 미완결은 따로"""
+    def cat(r):
+        if not r["post_window_complete"]:
+            return "0_post_window_incomplete"
+        pre, post = r["n_obs_before"] == 3, r["n_obs_after"] == 3
+        return {(True, True): "1_both", (True, False): "2_before_only", (False, True): "3_after_only"}.get((pre, post), "4_neither")
+    c = cl.assign(scope=cl.apply(cat, axis=1))
+    out = c.groupby("scope").agg(clusters=("c4", "size"), c4s=("c4", "nunique"),
+                                 before_0m=("n_obs_before", lambda s: int((s == 0).sum())),
+                                 before_1_2m=("n_obs_before", lambda s: int(s.between(1, 2).sum())),
+                                 after_0m=("n_obs_after", lambda s: int((s == 0).sum())),
+                                 after_1_2m=("n_obs_after", lambda s: int(s.between(1, 2).sum()))).reset_index()
+    return out
+
+
 def build_b2(con) -> dict[str, pd.DataFrame]:
     con.execute(f"""create or replace temp table _b2c as
         with e as (select e.market_c4 c4, e.observed_month as month, e.product_code, q.firm, e.effective_date
@@ -185,6 +364,7 @@ def build_b2(con) -> dict[str, pd.DataFrame]:
                z.first_observed_month_out,
                (select count(*) from w join usage_c4_month u on u.c4 = w.c4 and u.month = w.wm and u.observed_out
                  where w.c4 = cl.c4 and w.month = cl.month and w.rel < 0) n_obs_before,
+               (select count(*) from w where w.c4 = cl.c4 and w.month = cl.month and w.rel < 0) n_pre_months,
                (select count(*) from w join usage_c4_month u on u.c4 = w.c4 and u.month = w.wm and u.observed_out
                  where w.c4 = cl.c4 and w.month = cl.month and w.rel > 0) n_obs_after,
                p0.up up_before, p1.up up_month, p3.up up_after3, p0.qty qty_before, p3.qty qty_after3
@@ -213,7 +393,17 @@ def build_b2(con) -> dict[str, pd.DataFrame]:
     st.append(("3_usage_observed_all_3_after", st[-1][1][st[-1][1]["n_obs_after"] == 3]))
     steps = pd.DataFrame([{"stage": k, "clusters": len(g), "c4s": g["c4"].nunique()} for k, g in st])
     cl["case_usable"] = cl.index.isin(st[-1][1].index)
-    return {"b2_cluster_dist": dist, "b2_selection": steps, "b2_clusters": cl.drop(columns=["ref_price_chg"])}
+    return {"b2_cluster_dist": dist, "b2_selection": steps, "b2_clusters": cl.drop(columns=["ref_price_chg"]),
+            "b2_scope": b2_scope(cl), "b2_pre_truncated": b2_pre_truncated(cl)}
+
+
+def b2_pre_truncated(cl: pd.DataFrame) -> pd.DataFrame:
+    """진입 전 창이 분석 시작(2022-01)에 잘린 군집 (사후 창 완결). 사례 조건(앞뒤 3개월 모두 관측)은 바꾸지 않고,
+    있는 달만으로 보면 조건을 채우는지만 적는다 (사용자 결정 2026-11-16)"""
+    t = cl[cl["post_window_complete"] & (cl["n_pre_months"] < 3)]
+    out = t[["c4", "ingredient_name", "month", "n_entry_firms", "n_pre_months", "n_obs_before", "n_obs_after", "case_usable"]].copy()
+    out["meets_with_available_months"] = (t["n_obs_before"] == t["n_pre_months"]) & (t["n_pre_months"] > 0) & (t["n_obs_after"] == 3)
+    return out.reset_index(drop=True)
 
 
 def b2_case_series(con, c4: str, month: str) -> pd.DataFrame:
@@ -269,7 +459,27 @@ def build_c(con, month: str = C_MONTH) -> dict[str, pd.DataFrame]:
     ])
     rank = allg[(allg["n_products"] >= 2) & (allg["c4_obs_months"] == 12)].copy()
     rank.insert(0, "rank", range(1, len(rank) + 1))
-    return {"c_f10_sample_check": f10, "c_groups_all": allg, "c_selection": sel, "c_rank": rank}
+    total = con.execute("select sum(amt) from _up where substr(month, 1, 4) = ?", [year]).fetchone()[0]
+    return {"c_f10_sample_check": f10, "c_groups_all": allg, "c_selection": sel, "c_rank": rank,
+            **c_by_c4(rank, total)}
+
+
+def c_by_c4(rank: pd.DataFrame, total_amt: float) -> dict[str, pd.DataFrame]:
+    """C 본문: 성분4 단위 (사용자 결정 2026-11-16 [3]). 순위 대상 그룹(제품 2개 이상, 원외 12개월 관측)을 성분4로 묶는다.
+    가격 차가 가장 큰 그룹 = 최고/최저 비율이 가장 큰 그룹 (같으면 제품 수가 많은 그룹)."""
+    r = rank.sort_values(["c4", "max_min_ratio", "n_products"], ascending=[True, False, False])
+    top = r.groupby("c4").head(1).set_index("c4")
+    g = rank.groupby("c4").agg(c4_out_amt_year=("c4_out_amt_year", "first"), n_groups=("grp", "size"),
+                               n_products=("n_products", "sum")).join(
+        top[["grp", "ingredient_code", "ingredient_name", "n_products", "min_price", "max_price", "max_min_ratio"]]
+        .rename(columns=lambda c: f"widest_{c}"))
+    g = g.sort_values("c4_out_amt_year", ascending=False).reset_index()
+    g.insert(0, "rank", range(1, len(g) + 1))
+    share = pd.DataFrame([{"total_out_amt_year": total_amt, "c4s": len(g), "c4_unique_amt": g["c4_out_amt_year"].sum(),
+                           "share_c4_unique": round(g["c4_out_amt_year"].sum() / total_amt, 4),
+                           "group_row_amt_sum": rank["c4_out_amt_year"].sum(),
+                           "share_group_row_sum": round(rank["c4_out_amt_year"].sum() / total_amt, 4)}])
+    return {"c_rank_c4": g, "c_share": share}
 
 
 def disclosure_check(con) -> pd.DataFrame:
@@ -290,6 +500,31 @@ def write_all(con) -> dict[str, pd.DataFrame]:
     pairs = build_b1_pairs(con)
     st, slopes = b1_summary(pairs, seed)
     tabs = {"b1_pairs": pairs, "b1_selection": st, "b1_slopes": slopes}
+    # 주 지표 = 유효일 달 일수 가중 (eff_daywt, 사용자 결정 2026-11-16). 관측월 기준(b1_slopes 등)은 민감도
+    eff = b1_effective_pairs(con, pairs)
+    sel_e, slo_e = [], []
+    for key in ("eff_daywt", "eff_excl_mid"):
+        p = eff.drop(columns=["stage", "dlog_list"]).rename(columns={f"stage_{key}": "stage", "dlog_list_eff": "dlog_list"})
+        s1, s2 = b1_summary(p, seed)
+        sel_e.append(s1.assign(basis=key))
+        slo_e.append(s2.assign(basis=key))
+    tabs["b1_pairs_effective"] = eff[["c4", "month", "n_basket", "n_changed", "n_changed_eff", "dlog_list", "dlog_list_eff",
+                                      "dlog_up", "mid_month_change", "n_comp", "n_listing_delisting", "stage", "stage_eff_daywt", "stage_eff_excl_mid"]]
+    tabs["b1_selection_effective"] = pd.concat(sel_e)
+    tabs["b1_slopes_effective"] = pd.concat(slo_e)
+    # 주 지표·대조군·제외 내역 (세 기준 나란히)
+    mains, exs = [], []
+    for key, stage_col, xcol in (("observed_month", "stage", "dlog_list"), ("eff_daywt", "stage_eff_daywt", "dlog_list_eff"),
+                                 ("eff_excl_mid", "stage_eff_excl_mid", "dlog_list_eff")):
+        d = eff.assign(stage=eff[stage_col], x=eff[xcol], y=eff["dlog_up"])
+        m, e = b1_main(d, key)
+        mains.append(m)
+        exs.append(e)
+        # 좁힌 기준선: 그 달 그 성분에 등재·삭제 이벤트가 없는 쌍 (대상·대조군 같은 조건)
+        mains.append(b1_main(d[d["n_listing_delisting"] == 0], key, "no_listing_delisting")[0])
+    tabs["b1_main"] = pd.concat(mains)
+    tabs["b1_exclusion"] = pd.concat(exs)
+    tabs.update(disclosure_detail(con))
     tabs.update(build_b2(con))
     tabs.update(build_c(con))
     tabs["b_disclosure_check"] = disclosure_check(con)

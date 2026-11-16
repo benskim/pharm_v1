@@ -147,3 +147,111 @@ def test_b1_outputs_consistent():
     assert st["0_all_pairs"] == len(p)
     assert st[[s for s in st.index if s[0].isdigit() and s[1] == "_" and s != "0_all_pairs"]].sum() + st["target"] == len(p)
     assert st["2a_usage_never_observed"] + st["2b_usage_partly_unobserved"] == st["2_usage_unobserved"]
+
+
+def test_effective_month_prices_synthetic():
+    """유효일 기준 일수 가중 목록가 (손 계산)
+    q1: 100, 100, 90. 2024-03 관측, 유효일 2024-02-10 → 2월 = 100×9/29 + 90×20/29 (2/10~2/29 20일이 새 금액), 3월 90
+    q2: 100, 80, 80. 2024-02 관측, 유효일 2024-02-01 → 관측월과 같음 (100, 80, 80)
+    q3: 50, 50, 40. 2024-03 관측, 유효일 2024-03-11 → 3월 = 50×10/31 + 40×21/31"""
+    con = duckdb.connect()
+    con.execute("create table s3_cal as select * from (values ('2024-01', null, 1), ('2024-02', '2024-01', 2), ('2024-03', '2024-02', 3)) t(list_month, prev_month, mi)")
+    con.execute("create table product_state_month (product_code varchar, list_month varchar, c4 varchar, state_asof varchar, price_listed double)")
+    rows = []
+    for pc, ps in (("q1", (100, 100, 90)), ("q2", (100, 80, 80)), ("q3", (50, 50, 40))):
+        rows += [(pc, m, "X001", "reimbursed", p) for m, p in zip(("2024-01", "2024-02", "2024-03"), ps)]
+    con.executemany("insert into product_state_month values (?, ?, ?, ?, ?)", rows)
+    con.execute("""create table event_ledger as select * from (values
+        ('q1', '2024-03', date '2024-02-10', 'PRICE_CHANGE'), ('q2', '2024-02', date '2024-02-01', 'PRICE_CHANGE'),
+        ('q3', '2024-03', date '2024-03-11', 'PRICE_CHANGE')) t(product_code, observed_month, effective_date, event_type)""")
+    p = S.effective_month_prices(con).set_index(["product_code", "list_month"])["p_eff"]
+    assert math.isclose(p[("q1", "2024-02")], 100 * 9 / 29 + 90 * 20 / 29)
+    assert (p[("q1", "2024-01")], p[("q1", "2024-03")]) == (100, 90)
+    assert [p[("q2", m)] for m in ("2024-01", "2024-02", "2024-03")] == [100, 80, 80]
+    assert math.isclose(p[("q3", "2024-03")], 50 * 10 / 31 + 40 * 21 / 31)
+    assert p[("q3", "2024-02")] == 50
+    con.close()
+
+
+def test_weighted_quantile_hand():
+    # 값 1,2,3 가중 1,1,2 → 누적 0.25, 0.5, 1.0 → 중앙값 2, 0.6분위 3
+    v, w = np.array([3.0, 1.0, 2.0]), np.array([2.0, 1.0, 1.0])
+    assert S.weighted_quantile(v, w, 0.5) == 2.0
+    assert S.weighted_quantile(v, w, 0.6) == 3.0
+
+
+def test_b1_main_synthetic():
+    """대상 3쌍, 대조군 4쌍, 미관측 1쌍, 바구니 없음 1쌍 (손 계산)
+    대상 x/y: (-0.10, -0.05), (-0.20, -0.30), (0.10, -0.02) → 같은 방향 2/3. 세 쌍 모두 |x|≥1% → 비율 0.5, 1.5, -0.2 → 중앙값 0.5
+    대조군 y: -0.25, -0.05, 0.0, 0.15 → 오름 1/4, 내림 2/4, 그대로 1/4
+    기준선(부호): x<0 두 쌍 0.5, x>0 한 쌍 0.25 → (0.5+0.5+0.25)/3
+    |x_i| 이상: 0.10 → 오름 1/4 내림 1/4, 0.20 → 오름 0/4 내림 1/4, 0.10 → 1/4, 1/4
+      x 방향 기준선 = (1/4 + 1/4 + 1/4)/3 = 0.25. 대상 x 방향 |x| 이상 = 1/3 (둘째 쌍만)
+    금액 가중 같은 방향: 가중 1, 2, 7 → (1+2)/10"""
+    df = pd.DataFrame({
+        "c4": ["a", "b", "c", "d", "e", "f", "g", "h", "i"],
+        "stage": ["target"] * 3 + ["3_no_list_change"] * 4 + ["2_usage_unobserved", "1_no_basket"],
+        "x": [-0.10, -0.20, 0.10, 0, 0, 0, 0, np.nan, np.nan],
+        "y": [-0.05, -0.30, -0.02, -0.25, -0.05, 0.0, 0.15, np.nan, 0.01],
+        "amt1": [1.0, 2.0, 7.0, 1, 1, 1, 1, np.nan, 1],
+        "obs0": [True] * 7 + [False, True], "obs1": [True] * 9,
+        "n_basket": [1] * 8 + [0]})
+    m, ex = S.b1_main(df, "t")
+    v = m.set_index("metric")["value"]
+    assert v["share_same_sign"] == round(2 / 3, 4)
+    assert v["ratio_median"] == 0.5
+    assert (v["ctl_share_up"], v["ctl_share_down"], v["ctl_share_flat"]) == (0.25, 0.5, 0.25)
+    assert v["ctl_expected_same_sign"] == round(1.25 / 3, 4)
+    assert v["ctl_expected_same_sign_ge_size"] == 0.25
+    assert v["share_same_sign_ge_size"] == round(1 / 3, 4)
+    assert v["w_share_same_sign"] == 0.3
+    e = ex.set_index("category")["pairs"]
+    assert e.to_dict() == {"usage_unobserved": 1, "no_basket": 1, "no_list_change": 4, "mid_month_change": 0, "target": 3}
+    assert math.isclose(ex["share_pct"].sum(), 100, abs_tol=0.05)
+
+
+def test_b2_scope_synthetic():
+    cl = pd.DataFrame({"c4": list("abcde"), "post_window_complete": [True, True, True, True, False],
+                       "n_obs_before": [3, 3, 0, 2, 3], "n_obs_after": [3, 1, 3, 0, 1]})
+    s = S.b2_scope(cl).set_index("scope")["clusters"].to_dict()
+    assert s == {"0_post_window_incomplete": 1, "1_both": 1, "2_before_only": 1, "3_after_only": 1, "4_neither": 1}
+
+
+def test_c_by_c4_synthetic():
+    """성분4 X: 그룹 2개(비율 1.2 제품 3, 비율 1.5 제품 2) 금액 100, 성분4 Y: 그룹 1개 금액 300, 전체 500
+    → Y 1위, X의 가장 넓은 그룹 = 비율 1.5, 성분4 단위 비중 400/500, 그룹 행 합 500/500"""
+    rank = pd.DataFrame({"c4": ["X", "X", "Y"], "grp": ["g1", "g2", "g3"], "ingredient_code": ["i1", "i2", "i3"],
+                         "ingredient_name": ["n1", "n2", "n3"], "n_products": [3, 2, 4], "min_price": [10, 10, 5],
+                         "max_price": [12, 15, 6], "max_min_ratio": [1.2, 1.5, 1.2], "c4_out_amt_year": [100.0, 100.0, 300.0]})
+    t = S.c_by_c4(rank, 500.0)
+    g = t["c_rank_c4"].set_index("c4")
+    assert list(t["c_rank_c4"]["c4"]) == ["Y", "X"]
+    assert (g.loc["X", "n_groups"], g.loc["X", "widest_grp"], g.loc["X", "widest_max_min_ratio"]) == (2, "g2", 1.5)
+    assert (t["c_share"].loc[0, "share_c4_unique"], t["c_share"].loc[0, "share_group_row_sum"]) == (0.8, 1.0)
+
+
+def test_b2_pre_truncated_synthetic():
+    """진입 전 창이 잘린 군집만 (사후 창 완결). 있는 달이 모두 관측되고 사후 3개월 관측이면 meets = True
+    a: 있는 달 1, 관측 1, 사후 3 → True / b: 있는 달 2, 관측 0 → False / c: 창 3개월 → 목록 밖 / d: 사후 창 미완결 → 목록 밖"""
+    cl = pd.DataFrame({"c4": list("abcd"), "ingredient_name": list("abcd"), "month": ["2022-02", "2022-03", "2023-01", "2025-11"],
+                       "n_entry_firms": [5] * 4, "n_pre_months": [1, 2, 3, 3], "n_obs_before": [1, 0, 3, 3],
+                       "n_obs_after": [3, 3, 3, 1], "case_usable": [False, False, True, False],
+                       "post_window_complete": [True, True, True, False]})
+    t = S.b2_pre_truncated(cl).set_index("c4")
+    assert list(t.index) == ["a", "b"]
+    assert t["meets_with_available_months"].to_dict() == {"a": True, "b": False}
+
+
+def test_b1_main_subset_label():
+    """좁힌 기준선은 같은 함수에 거른 표를 넣는다: 대상·대조군 모두 같은 조건으로 줄어든다
+    대상 2쌍 (같은 방향 1개, 그중 등재·삭제 있는 쌍은 같은 방향), 대조군 2쌍 (내림 1, 등재·삭제 있는 쌍)"""
+    df = pd.DataFrame({"c4": list("abcd"), "stage": ["target", "target", "3_no_list_change", "3_no_list_change"],
+                       "x": [-0.1, -0.1, 0, 0], "y": [-0.05, 0.02, -0.01, 0.03], "amt1": [1.0] * 4,
+                       "obs0": [True] * 4, "obs1": [True] * 4, "n_basket": [1] * 4, "n_listing_delisting": [1, 0, 1, 0]})
+    full = S.b1_main(df, "t")[0].set_index("metric")["value"]
+    sub_df = df[df["n_listing_delisting"] == 0]
+    m = S.b1_main(sub_df.assign(x=sub_df["x"]), "t", "no_listing_delisting")[0]
+    v = m.set_index("metric")["value"]
+    assert (full["share_same_sign"], full["ctl_expected_same_sign"]) == (0.5, 0.5)
+    assert (v["pairs"], v["share_same_sign"], v["ctl_pairs"], v["ctl_expected_same_sign"]) == (1, 0.0, 1, 0.0)
+    assert set(m["subset"]) == {"no_listing_delisting"}

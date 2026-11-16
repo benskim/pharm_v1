@@ -433,7 +433,7 @@ labeler claude 57 / user_reviewed 4, label_source raw 59 / external 2. 1차와 �
 | 2 | 업체명만 다르고 모두 같음: 양도양수가 아니라 회사 이름 개명 (원장 ATTR_CHANGE firm과 같음) |
 | 59 | 같은 품목, 함량 표기만 바뀜: 6.39mg은 에스시탈로프람옥살산염의 실제 질량, 5mg은 에스시탈로프람 환산 질량 |
 
-**정밀도 (61행)**: labeler claude 47 / user_reviewed 14, label_source raw 59 / external 2. 1차와 최종 라벨이 다른 행 4 (51행 유형, 25·44행 날짜, 2행 날짜 비움→Y).
+**정밀도 (61행)**: labeler claude 47 / user_reviewed 14, label_source raw 59 / external 2. 1차와 최종 라벨이 다른 행: **user_reviewed 행만 4** (51행 유형, 25·44행 날짜, 2행 날짜 비움→Y) / **전체 61행 8** (위 4 + ATTR_CHANGE 1·3·4·5행 날짜 비움→Y, labeler claude).
 
 | 범위 | 라벨 | n | 맞음 | 비가중 (95%) | 층 크기 가중 (95%) | n_eff |
 |---|---|---|---|---|---|---|
@@ -455,7 +455,12 @@ labeler claude 57 / user_reviewed 4, label_source raw 59 / external 2. 1차와 �
 | user_reviewed | 14 | 14 | 100% (78.5–100) | 100% (71.1–100) | 9.5 |
 | 원본만 | 59 | 59 | 100% (93.9–100) | 100% (81.6–100) | 17.0 |
 
-1차와 최종이 다른 행: 4 (51행 유형, 25·44행 날짜, 2행 날짜). `label_review_diff.csv`는 user_reviewed 행만 비교하므로 1·3·4·5행(1차 비움 → Y, labeler claude)은 세지 않는다. 이 넷을 넣으면 8.
+1차와 최종이 다른 행 (두 기준):
+
+| 기준 | 행 수 | 행 |
+|---|---|---|
+| user_reviewed 행만 (`label_review_diff.csv`) | **4** | 51행 유형, 25·44행 날짜, 2행 날짜 (비움 → Y) |
+| 전체 61행 | **8** | 위 4 + ATTR_CHANGE 1·3·4·5행 날짜 (1차 비움 → Y, labeler claude) |
 
 4. **성분 4자리가 바뀐 속성 변경**
 - `market_month`(성분×월 표)는 P2 단계라 아직 없다. 지금 집계(A4 묶음, S5 B1·B2·C)는 `product_state_month.c4`를 쓰고, 이 값은 **그 달 파일의 주성분코드**에서 온다. 4행(645900990 코데농정)은 2022-04까지 2674, **2022-05부터 4932**로 집계된다 (`ATTR_CHANGE:645900990:2022-05`의 market_c4도 4932). 3행(643507101 마카이드주)은 243340COS → 243340BIJ로 제형만 바뀌어 성분4 2433 그대로다.
