@@ -65,10 +65,11 @@ p1-s5:
 	$(PY) -m pbd.ledger.s5_market
 	$(PY) -m pytest -q tests/test_s5.py
 
-# P1 S6: 월간 리포트 예시 2개 (2024-09, 2025-11) → outputs/reports/, outputs/dashboard/
+# P1 S6: 월간 리포트 예시 2개 (2024-09, 2025-11) → outputs/reports/, outputs/dashboard/, 성분 묶음 검토표 outputs/s6/
 p1-s6:
 	$(PY) -m pbd.ledger.s6_report 2024-09
 	$(PY) -m pbd.ledger.s6_report 2025-11
+	$(PY) -m pbd.ledger.s6_report --groups 2025-12
 	$(PY) -m pytest -q tests/test_s6.py
 
 p1-s7:
