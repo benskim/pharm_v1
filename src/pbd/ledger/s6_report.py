@@ -402,13 +402,17 @@ def events_this_month(con, month: str) -> pd.DataFrame:
     df = con.execute("""select e.event_type, e.kind, e.product_code, coalesce(p1.product_name, p0.product_name) product_name,
                coalesce(p1.firm, p0.firm) firm, e.market_c4 c4, r.ingredient_code, n.ingredient_name, g.short_name, g.group_key,
                e.effective_date, e.effective_date_lo, e.effective_date_hi, e.date_source, e.evidence,
-               r.same_code_remaining, r.same_c4_remaining, round(b.base_amt / 1e8, 2) base_amt
+               r.same_code_remaining, r.same_c4_remaining, round(b.base_amt / 1e8, 2) base_amt, nc.n n_products_c4,
+               -- 제품 1개 몫 (근사) = 성분4 원외 금액 / 성분4 reimbursed 제품 수 (F1과 같은 제품 수 비중 근사)
+               round(b.base_amt / nullif(nc.n, 0) / 1e8, 3) product_share
         from event_ledger e join s3_cal k on k.list_month = e.observed_month
+        left join (select c4, count(*) n from product_state_month where list_month = ? and state_asof = 'reimbursed' group by 1) nc
+               on nc.c4 = e.market_c4
         left join product_state_month p1 on p1.product_code = e.product_code and p1.list_month = e.observed_month
         left join product_state_month p0 on p0.product_code = e.product_code and p0.list_month = k.prev_month
         left join _c4name n on n.c4 = e.market_c4 left join _c4grp g on g.c4 = e.market_c4
         left join _rem r on r.product_code = e.product_code left join _base b on b.c4 = e.market_c4
-        where e.observed_month = ? order by e.event_type, e.kind, e.market_c4, e.product_code""", [month]).df()
+        where e.observed_month = ? order by e.event_type, e.kind, e.market_c4, e.product_code""", [month, month]).df()
     return df
 
 
@@ -487,20 +491,22 @@ def attention(sig: pd.DataFrame, imp: pd.DataFrame, lstg: pd.DataFrame, ev: pd.D
             r = a.iloc[0]
             lines.append(f"**등재 예고** — {labels.get(r.gk, r.gk)} {int(r.firms_noticed):,}개 업체 {_d(r.notice_date)} 등재 예고 "
                          f"(업체 수 {int(r.firms_now):,} → {int(r.firms_now + r.new_firms):,}).")
-    # 3) 삭제·정지: 대체 없는(같은 주성분코드 남은 제품 0) 제품이 있는 성분4의 base_amt 합이 가장 큰 묶음. 없으면 삭제 건수가 가장 많은 묶음
+    # 3) 삭제·정지: 같은 주성분코드에 남은 reimbursed 제품이 0인 삭제(exit)·정지의 건수가 가장 많은 묶음.
+    #    같으면 그 제품들의 제품 몫(근사) 합이 큰 쪽, 그다음 묶음 이름 순. 그런 제품이 없으면 줄을 쓰지 않는다
     d = ev[((ev["event_type"] == "DELISTING") & (ev["kind"] == "exit")) | (ev["event_type"] == "SUSPEND")]
     if len(d):
         d = d.assign(gk=d["c4"].map(g).fillna("c4:" + d["c4"].fillna("")), none=d["same_code_remaining"] == 0)
-        base_sum = (d[d["none"]].drop_duplicates(["gk", "c4"]).groupby("gk")["base_amt"].sum(min_count=1))
-        a = d.groupby("gk").agg(n=("product_code", "size"), k=("none", "sum")).reset_index()
-        a["base"] = a["gk"].map(base_sum)
-        cand = a[(a["k"] > 0) & a["base"].notna()].sort_values(["base", "k", "gk"], ascending=[False, False, True])
-        if cand.empty:
-            cand = a.sort_values(["n", "k", "gk"], ascending=[False, False, True])
-        r = cand.iloc[0]
-        what = "삭제/정지" if set(d.loc[d["gk"] == r.gk, "event_type"]) == {"DELISTING", "SUSPEND"} else \
-            ("정지" if set(d.loc[d["gk"] == r.gk, "event_type"]) == {"SUSPEND"} else "삭제")
-        lines.append(f"**삭제·정지** — {labels.get(r.gk, r.gk)} {int(r.n):,}개 제품 {what}, 그중 대체 제품이 없는 것 {int(r.k):,}개.")
+        nd = d[d["none"]]
+        if len(nd):
+            a = nd.groupby("gk").agg(k=("product_code", "size"), share=("product_share", lambda x: x.sum(min_count=1))).reset_index()
+            a["n"] = a["gk"].map(d.groupby("gk").size())
+            a = a.assign(_s=a["share"].fillna(-1)).sort_values(["k", "_s", "gk"], ascending=[False, False, True])
+            r = a.iloc[0]
+            kinds = set(d.loc[d["gk"] == r.gk, "event_type"])
+            what = "삭제/정지" if kinds == {"DELISTING", "SUSPEND"} else ("정지" if kinds == {"SUSPEND"} else "삭제")
+            share = "자료 없음" if pd.isna(r.share) else f"약 {r.share:,.1f}억 원/월"
+            lines.append(f"**삭제·정지** — {labels.get(r.gk, r.gk)} {int(r.n):,}개 제품 {what}, 그중 같은 함량·제형 대체 제품이 없는 것 "
+                         f"{int(r.k):,}개 (제품 몫 합 {share}).")
     return lines[:3]
 
 
@@ -508,8 +514,8 @@ ATTENTION_RULES = [
     "가격 인하 예고: 점수 = 가격 변경 예고의 과거 실현율 × |상한금액 기준 월 영향|. 같은 성분 묶음(염·수화물만 다른 성분4)으로 합산해 가장 큰 묶음 1개. "
     "같으면 예고 제품 수가 많은 쪽, 그다음 묶음 이름 순. 월 영향을 계산할 수 없는(사용통계 미관측) 묶음은 뽑지 않는다.",
     "등재 예고: 새 업체 수(이번 달 reimbursed 업체에 없던 업체)가 가장 많은 묶음 1개. 같으면 기준 원외 금액이 큰 쪽, 그다음 묶음 이름 순.",
-    "삭제·정지: 이번 달 삭제(exit)·정지 중 같은 주성분코드에 남은 reimbursed 제품이 0인 제품이 있는 묶음에서, 그 성분4들의 기준 원외 금액 합이 가장 큰 묶음 1개. "
-    "그런 묶음이 없으면 삭제·정지 건수가 가장 많은 묶음 (같으면 대체 없는 건수, 그다음 묶음 이름 순).",
+    "삭제·정지: 이번 달 삭제(exit)·정지 중 같은 주성분코드(성분·함량·제형)에 남은 reimbursed 제품이 0인 것의 건수가 가장 많은 묶음 1개. "
+    "같으면 그 제품들의 제품 몫 합(근사: 성분4 원외 금액 ÷ 성분4 reimbursed 제품 수)이 큰 쪽, 그다음 묶음 이름 순. 그런 제품이 없으면 쓰지 않는다.",
 ]
 
 
@@ -746,13 +752,22 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
             L += [f"### {EVENT_LABEL[t]} {len(gt):,}건 ({kinds})", ""]
             ex = gt[gt["kind"] == "exit"]
             k_none = int((ex["same_code_remaining"] == 0).sum())
-            L.append(f"**대체 제품 없는 삭제 {k_none:,}건** (같은 주성분코드 = 성분·함량·제형이 같은 reimbursed 제품이 {month} 목록에 남지 않음).")
+            L.append(f"**같은 함량·제형 대체 제품 없는 삭제 {k_none:,}건** (같은 주성분코드 = 성분·함량·제형이 같은 reimbursed 제품이 {month} 목록에 남지 않음).")
             if len(ex):
-                tf = ex.groupby("firm").size().reset_index(name="n").sort_values(["n", "firm"], ascending=[False, True]).head(5)
-                ti = ex.assign(nm=ex["c4"].map(sn).fillna("")).groupby(["c4", "nm"]).size().reset_index(name="n") \
-                    .sort_values(["n", "c4"], ascending=[False, True]).head(5)
-                L.append("- 업체별 상위 5: " + ", ".join(f"{_name(r.firm)} {r.n}" for r in tf.itertuples()) + ".")
-                L.append("- 성분별 상위 5: " + ", ".join(f"{r.nm or r.c4} ({r.c4}) {r.n}" for r in ti.itertuples()) + ".")
+                def _tops(x):
+                    tf = x.groupby("firm").size().reset_index(name="n").sort_values(["n", "firm"], ascending=[False, True]).head(5)
+                    ti = x.assign(nm=x["c4"].map(sn).fillna("")).groupby(["c4", "nm"]).size().reset_index(name="n") \
+                        .sort_values(["n", "c4"], ascending=[False, True]).head(5)
+                    return (", ".join(f"{_name(r.firm)} {r.n}" for r in tf.itertuples()),
+                            ", ".join(f"{r.nm or r.c4} ({r.c4}) {r.n}" for r in ti.itertuples()))
+                fa, ia = _tops(ex)
+                L.append(f"- 업체별 상위 5 (전체 삭제 {len(ex):,}건 기준): {fa}.")
+                L.append(f"- 성분별 상위 5 (전체 삭제 {len(ex):,}건 기준): {ia}.")
+                nx = ex[ex["same_code_remaining"] == 0]
+                if len(nx):
+                    fn, inn = _tops(nx)
+                    L.append(f"- 업체별 상위 5 (같은 함량·제형 대체 제품 없는 삭제 {len(nx):,}건 기준): {fn}.")
+                    L.append(f"- 성분별 상위 5 (같은 함량·제형 대체 제품 없는 삭제 {len(nx):,}건 기준): {inn}.")
             if month[5:] == "11":
                 L.append(f"- {NOVEMBER_NOTE}")
             if len(dl):
@@ -763,15 +778,15 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
             L.append("")
         else:
             L += [f"### {EVENT_LABEL[t]} {len(gt):,}건", ""]
-        gt = gt.assign(_ba=gt["base_amt"].fillna(-1)).sort_values(
-            ["same_code_remaining", "_ba", "c4", "product_code"], ascending=[True, False, True, True], na_position="last")
+        gt = gt.assign(_ps=gt["product_share"].fillna(-1)).sort_values(
+            ["same_code_remaining", "_ps", "c4", "product_code"], ascending=[True, False, True, True], na_position="last")
         L += _table(["제품코드", "제품명", "업체", "성분4", "구분", "유효일", "유효일 근거", "같은 주성분코드 남은 제품", "같은 성분4 남은 제품",
-                     "기준 원외 금액 (억/월)"],
+                     "성분4 전체 원외 금액 (억/월)", "제품 1개 몫 (근사, 억/월)"],
                     [[r.product_code, _name(r.product_name), _name(r.firm), r.c4 or "",
                       DELIST_KIND.get(r.kind, r.kind) if t == "DELISTING" else (r.kind or ""),
                       _d(r.effective_date) or f"{_d(r.effective_date_lo)} ~ {_d(r.effective_date_hi)}",
                       DATE_SOURCE.get(r.date_source, r.date_source or ""), _f(r.same_code_remaining), _f(r.same_c4_remaining),
-                      _amt(r.base_amt)]
+                      _amt(r.base_amt), "자료 없음" if pd.isna(r.product_share) else f"{r.product_share:,.2f}"]
                      for r in gt.head(LIST_ROWS).itertuples()])
         if len(gt) > LIST_ROWS:
             L.append(f"\n외 {len(gt) - LIST_ROWS:,}건 (`events.csv`).")

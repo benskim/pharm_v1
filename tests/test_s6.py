@@ -222,13 +222,21 @@ def test_f2_attention_deterministic_ties():
     imp = pd.DataFrame({"c4": ["A1", "B1"], "impact_listed": [-2.0, -2.0]})
     lstg = pd.DataFrame({"gk": ["gamma", "delta"], "notice_date": pd.to_datetime(["2024-09-10"] * 2), "firms_noticed": [3, 3],
                          "firms_now": [1, 2], "new_firms": [3, 3], "base_amt": [5.0, 5.0]})
-    ev = pd.DataFrame({"event_type": ["DELISTING"] * 3, "kind": ["exit"] * 3, "c4": ["C1", "D1", "D1"], "product_code": ["p", "q", "r"],
-                       "same_code_remaining": [0, 0, 2], "base_amt": [7.0, 3.0, 3.0]})
+    # 삭제: gamma(C1) 대체 없음 1건, 몫 7.0 / delta(D1) 대체 없음 2건(q, s), 몫 3.0 + 1.0, r은 대체 있음 → 건수가 먼저라 delta
+    ev = pd.DataFrame({"event_type": ["DELISTING"] * 4, "kind": ["exit"] * 4, "c4": ["C1", "D1", "D1", "D1"],
+                       "product_code": ["p", "q", "r", "s"], "same_code_remaining": [0, 0, 2, 0],
+                       "base_amt": [70.0, 30.0, 30.0, 30.0], "product_share": [7.0, 3.0, 3.0, 1.0]})
     out = [R.attention(sig, imp, lstg, ev, rates, grp, labels) for _ in range(2)]
     assert out[0] == out[1]
     assert out[0][0].startswith("**가격 인하 예고** — alpha 2개 제품")          # 점수·제품 수 같음 → 이름 순 alpha
     assert out[0][1] == "**등재 예고** — delta 3개 업체 2024-09-10 등재 예고 (업체 수 2 → 5)."
-    assert out[0][2] == "**삭제·정지** — gamma 1개 제품 삭제, 그중 대체 제품이 없는 것 1개."
+    assert out[0][2] == "**삭제·정지** — delta 3개 제품 삭제, 그중 같은 함량·제형 대체 제품이 없는 것 2개 (제품 몫 합 약 4.0억 원/월)."
+    # 건수가 같으면 제품 몫 합이 큰 쪽 (gamma 7.0 > delta 3.0)
+    ev2 = ev[ev["product_code"] != "s"]
+    assert R.attention(sig, imp, lstg, ev2, rates, grp, labels)[2].startswith("**삭제·정지** — gamma 1개 제품 삭제")
+    # 대체 없는 삭제가 없으면 줄을 쓰지 않는다
+    ev3 = ev.assign(same_code_remaining=1)
+    assert not any(x.startswith("**삭제·정지**") for x in R.attention(sig, imp, lstg, ev3, rates, grp, labels))
 
 
 def test_f3_short_name():
@@ -284,3 +292,22 @@ def test_display_names_synthetic(tmp_path):
     assert c.execute("select display_name from _ingname where ingredient_code = 'AAA'").fetchone()[0] == "telmisartan 40mg 외 1종"
     assert c.execute("select ingredient_name, ingredient_name_raw from _c4name where c4 = 'A001'").fetchone() == ("telmisartan 40mg 외 1종", "telmisartan   40mg")
     c.close()
+
+
+def test_f3_group_overrides_split():
+    """사용자 결정: calcium acetate / gluconate, human insulin 일반형 / N70·R30을 나눈다 (config group_overrides)"""
+    c = duckdb.connect()
+    c.execute("""create table _c4name as select * from (values ('1217', 'calcium acetate 0.71g', 1), ('1222', 'calcium gluconate 2g(0.1g/mL)', 1),
+        ('1701', 'human insulin 1KI.U(100I.U/mL)', 1), ('1704', 'human insulin(N70/R30) 1KI.U(100I.U/mL)', 1)) t(c4, base_name, n_components)""")
+    R._groups(c)
+    g = dict(c.execute("select c4, group_key from _c4grp").fetchall())
+    assert len({g["1217"], g["1222"]}) == 2 and len({g["1701"], g["1704"]}) == 2
+
+
+@real
+def test_f4_product_share(r2511):
+    """제품 1개 몫 = 성분4 원외 금액 / 성분4 reimbursed 제품 수 (억 원/월)"""
+    e = r2511[1]["events"]
+    x = e[e["product_share"].notna()]
+    assert len(x) > 0
+    assert ((x["product_share"] - x["base_amt"] / x["n_products_c4"]).abs() < 0.01).all()

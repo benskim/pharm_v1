@@ -18,4 +18,9 @@ salt_words: [hydrochloride, dihydrochloride, hcl, hydrobromide, citrate, phospha
              hydrate, monohydrate, dihydrate, trihydrate, hemihydrate, sesquihydrate, anhydrous, micronized, as]
 unit_words: [mg, g, ml, l, μg, ug, ㎍, iu, i.u, i.u., kiu, mu, u, "%", gbq, mbq, mci]
 # 수동 덮어쓰기: 성분4 → group_key (잘못 묶인 것을 고친다). 예: "1234": "c4:1234"
-group_overrides: {}
+group_overrides:
+  # 사용자 결정 2026-11-16: calcium(acetate / gluconate), human insulin(일반형 / N70·R30 혼합형)을 나눈다
+  "1217": "calcium acetate"
+  "1222": "calcium gluconate"
+  "1701": "human insulin"
+  "1704": "human insulin n70/r30"
