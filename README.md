@@ -32,11 +32,11 @@ Python 3.11, 디스크 약 5GB (원본 2.3GB, DB 약 1.7GB).
 ```
 make venv                      # .venv 생성, requirements.txt 설치 (약 1~2분)
 make check-sample              # 표본 회귀: reference/precheck_v3_output.md와 같아야 한다
-make p1-s1 p1-s2 p1-s3 p1-s4 p1-s5 p1-s6   # P1 전체 (단계마다 그 단계 시험 포함)
+make all                       # = p1-all: S0 → check-sample → P1 S1 ~ S6 → 전체 시험 (약 10분)
 make report MONTH=2024-09      # 한 달 리포트 → outputs/reports/P1_report_2024-09.md, outputs/dashboard/2024-09/
-make test                      # 전체 시험
+make test                      # 전체 시험 (213개, 약 3분)
 ```
-**지금 깨끗한 클론에서는 `make all`이 P1 S4에서 멈춘다.** 라벨을 채운 검증 표본(`outputs/validation/sample_60.csv`)이 저장소에 없기 때문이다. 또 `all`에는 아직 구현하지 않은 P2 단계가 들어 있다. 원인과 시간은 [docs/REPRODUCE_LOG.md](docs/REPRODUCE_LOG.md)에 있다. 라벨 표본이 있으면 위 순서대로 P1 S6까지 돌릴 수 있다. 깨끗한 클론에서도 2024-09 리포트는 커밋된 파일과 해시가 같았다.
+깨끗한 클론에서 `make all`(613초), `make test`(213개 통과), `make report MONTH=2024-09`가 모두 성공했다. 리포트 2개는 커밋된 파일과 해시가 같다 ([docs/REPRODUCE_LOG.md](docs/REPRODUCE_LOG.md)). P2 단계는 구현한 뒤 `all`에 넣는다. 라벨을 채운 검증 표본(`outputs/validation/sample_60.user_reviewed.csv`)은 저장소에 있고, `make p1-s4`는 이 파일을 덮어쓰지 않는다.
 
 ## 예시 리포트
 - [2024-09](outputs/reports/P1_report_2024-09.md): 시타글립틴 인하 예고, 아픽사반 등재 예고

@@ -24,3 +24,15 @@
 ## 확인 필요
 1. **라벨 표본 CSV**: `outputs/validation/sample_60.csv`를 저장소에 넣을까요 (`.gitignore` 예외)? 아니면 원본 데이터처럼 따로 받는 입력으로 README·DATA.md에 적을까요?
 2. **`make all`의 P2 목표**: P2 구현 전까지 `all`에서 빼거나 `p1-all`을 따로 둘까요?
+
+---
+
+# S7 반영 (2026-11-17)
+
+- 라벨 표본을 저장소에 넣었다: `outputs/validation/sample_60.user_reviewed.csv`(최종), `sample_60.claude_labeled.csv`(1차). S4 시험·정밀도는 user_reviewed를 읽고, `make p1-s4`는 그 파일을 덮어쓰지 않는다 (`sample_60.new.csv` / `sample_60.generated.csv`).
+- Makefile `p1-all`, `all = p1-all`. LIMITATIONS L16 영향 칸 수정.
+- SUMMARY.md 수정 (첫 문장을 가치부터, 실현율 표 기간 표시, A4 6묶음 한계, 누가 어떻게 쓰나, 공고 표 P2 행). 약 890어절이라 외부 확인 사례는 줄이지 않았다.
+- **깨끗한 클론 재현 2차 (커밋 `116ea57`) 성공**: `make all` 613초, `make test` 213개 통과, `make report MONTH=2024-09` 성공. 리포트 2개와 S2~S4 출력은 작업 환경과 바이트 동일. S5는 23개 중 `b1_pairs_effective.csv` 1개가 3행의 소수 17번째 자리만 다르다 (REPRODUCE_LOG 확인 필요).
+
+## 확인 필요
+1. `b1_pairs_effective.csv`의 부동소수점 끝자리 차이를 없앨까요 (쌍별 값 반올림 또는 해당 집계 단일 스레드)? 요약 숫자는 같습니다.
