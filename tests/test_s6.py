@@ -239,6 +239,12 @@ def test_f2_attention_deterministic_ties():
     assert not any(x.startswith("**삭제·정지**") for x in R.attention(sig, imp, lstg, ev3, rates, grp, labels))
 
 
+def test_small_amount_display():
+    """영향 규모·제품 몫: 절댓값 0.05억 미만은 "0.1억 미만", 미관측은 자료 없음"""
+    assert (R._small(-0.03), R._small(0.049, 2), R._small(0.05, 2), R._small(-1.05), R._small(None)) == \
+        ("0.1억 미만", "0.1억 미만", "0.05", "-1.1", "자료 없음")
+
+
 def test_f3_short_name():
     assert R.short_name("sitagliptin hydrochloride hydrate (as sitagliptin 0.1g)") == "sitagliptin"
     assert R.short_name("sitagliptin phosphate hydrate (as sitagliptin 0.1g)") == "sitagliptin"

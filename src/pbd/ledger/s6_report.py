@@ -486,7 +486,7 @@ def attention(sig: pd.DataFrame, imp: pd.DataFrame, lstg: pd.DataFrame, ev: pd.D
         if len(a):
             r = a.iloc[0]
             lines.append(f"**가격 인하 예고** — {labels.get(r.gk, r.gk)} {int(r.n):,}개 제품 {_d(r.date)}부터 상한금액 중앙 {r.med:.1f}% 인하 예고 "
-                         f"(과거 실현율 {_pct(rate_pp)}, 월 영향 약 {r.impact:,.1f}억 원).")
+                         f"(과거 실현율 {_pct(rate_pp)}, 월 영향 " + ("0.1억 원 미만" if abs(r.impact) < 0.05 else f"약 {r.impact:,.1f}억 원") + ").")
     # 2) 등재 예고: 새 업체 수가 가장 많은 묶음 (동점이면 base_amt 큰 쪽, 그다음 group_key)
     if len(lstg):
         a = lstg.sort_values(["new_firms", "base_amt", "gk"], ascending=[False, False, True], na_position="last")
@@ -507,7 +507,7 @@ def attention(sig: pd.DataFrame, imp: pd.DataFrame, lstg: pd.DataFrame, ev: pd.D
             r = a.iloc[0]
             kinds = set(d.loc[d["gk"] == r.gk, "event_type"])
             what = "삭제/정지" if kinds == {"DELISTING", "SUSPEND"} else ("정지" if kinds == {"SUSPEND"} else "삭제")
-            share = "자료 없음" if pd.isna(r.share) else f"약 {r.share:,.1f}억 원/월"
+            share = "자료 없음" if pd.isna(r.share) else ("0.1억 원/월 미만" if abs(r.share) < 0.05 else f"약 {r.share:,.1f}억 원/월")
             lines.append(f"**삭제·정지** — {labels.get(r.gk, r.gk)} {int(r.n):,}개 제품 {what}, 그중 같은 함량·제형 대체 제품이 없는 것 "
                          f"{int(r.k):,}개 (제품 몫 합 {share}).")
     return lines[:3]
@@ -518,7 +518,8 @@ ATTENTION_RULES = [
     "같으면 예고 제품 수가 많은 쪽, 그다음 묶음 이름 순. 월 영향을 계산할 수 없는(사용통계 미관측) 묶음은 뽑지 않는다.",
     "등재 예고: 새 업체 수(이번 달 reimbursed 업체에 없던 업체)가 가장 많은 묶음 1개. 같으면 기준 원외 금액이 큰 쪽, 그다음 묶음 이름 순.",
     "삭제·정지: 이번 달 삭제(exit)·정지 중 같은 주성분코드(성분·함량·제형)에 남은 reimbursed 제품이 0인 것의 건수가 가장 많은 묶음 1개. "
-    "같으면 그 제품들의 제품 몫 합(근사: 성분4 원외 금액 ÷ 성분4 reimbursed 제품 수)이 큰 쪽, 그다음 묶음 이름 순. 그런 제품이 없으면 쓰지 않는다.",
+    "같으면 그 제품들의 제품 몫 합(근사: 성분4 원외 금액 ÷ 성분4 reimbursed 제품 수)이 큰 쪽, 그다음 묶음 이름 순. 그런 제품이 없으면 쓰지 않는다. "
+    "삭제·정지 줄은 건수 기준이라 금액이 작은 묶음이 뽑힐 수 있다.",
 ]
 
 
@@ -529,6 +530,13 @@ def _f(v, nd: int = 0) -> str:
     if nd == 0:
         return f"{v:,.0f}"
     return f"{v:,.{nd}f}"
+
+
+def _small(v, nd: int = 1) -> str:
+    """영향 규모·제품 몫 (억 원): 절댓값 0.05억 미만은 "0.1억 미만", 미관측은 자료 없음 (CSV는 원값, 사용자 결정 2026-11-16)"""
+    if v is None or pd.isna(v):
+        return "자료 없음"
+    return "0.1억 미만" if abs(v) < 0.05 else f"{v:,.{nd}f}"
 
 
 def _amt(v) -> str:
@@ -688,7 +696,7 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
                         [[r.c4, _name(r.name), sn.get(r.c4, ""), r.notice_date, f"{int(r.n):,} / {_f(r.n_products_c4)}",
                           f"{r.med:+.1f}% ({r.lo:+.1f} ~ {r.hi:+.1f})" if not pd.isna(r.med) else "",
                           _amt(r.base_amt) + (f" ({int(r.base_months_observed)}개월)" if 0 < r.base_months_observed < BASE_MONTHS else ""),
-                          _amt(r.impact_listed), _amt(r.impact_pt), f"{r.exposure_this_month:.2f}"]
+                          _small(r.impact_listed), _small(r.impact_pt), f"{r.exposure_this_month:.2f}"]
                          for r in a.head(LIST_ROWS).itertuples()])
             if len(a) > LIST_ROWS:
                 L.append(f"\n외 성분4 {len(a) - LIST_ROWS:,}개 (`impact.csv`, `new_signals.csv`).")
@@ -790,7 +798,7 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
                       DELIST_KIND.get(r.kind, r.kind) if t == "DELISTING" else (r.kind or ""),
                       _d(r.effective_date) or f"{_d(r.effective_date_lo)} ~ {_d(r.effective_date_hi)}",
                       DATE_SOURCE.get(r.date_source, r.date_source or ""), _f(r.same_code_remaining), _f(r.same_c4_remaining),
-                      _amt(r.base_amt), "자료 없음" if pd.isna(r.product_share) else f"{r.product_share:,.2f}"]
+                      _amt(r.base_amt), _small(r.product_share, 2)]
                      for r in gt.head(LIST_ROWS).itertuples()])
         if len(gt) > LIST_ROWS:
             L.append(f"\n외 {len(gt) - LIST_ROWS:,}건 (`events.csv`).")
