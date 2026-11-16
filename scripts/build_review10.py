@@ -19,7 +19,7 @@ OUT = ROOT / "outputs/validation/review10_evidence.md"
 
 
 def main():
-    s = pd.read_csv(ROOT / "outputs/validation/sample_60.csv", dtype=str, keep_default_na=False).set_index("sample_id")
+    s = pd.read_csv(ROOT / "outputs/validation/sample_60.user_reviewed.csv", dtype=str, keep_default_na=False).set_index("sample_id")
     c = duckdb.connect()
     files = {"B": sorted((RAW / "benefit").glob("benefit_snapshot_table_*.parquet")),
              "S": sorted((RAW / "substitute").glob("substitute_snapshot_table_*.parquet"))}

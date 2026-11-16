@@ -2,7 +2,7 @@
 PY ?= .venv/bin/python
 export PYTHONPATH := src
 
-.PHONY: help venv sample s0 check-sample test \
+.PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
         p2-t1 p2-t2 p2-t3 p2-t4 p2-t5 all
 
@@ -52,7 +52,7 @@ p1-s3:
 	$(PY) -m pbd.ledger.s3_ledger
 	$(PY) -m pytest -q tests/test_s3_synthetic.py tests/test_s3_integration.py
 
-# P1 S4: 분석 A (A1~A6) → outputs/s4/, outputs/validation/sample_60.csv. 라벨을 채운 뒤 `make p1-s4-precision`
+# P1 S4: 분석 A (A1~A6) → outputs/s4/. 표본은 sample_60.new.csv(최종 라벨이 있을 때) 또는 sample_60.generated.csv. 정밀도: `make p1-s4-precision` (sample_60.user_reviewed.csv)
 p1-s4:
 	$(PY) -m pbd.ledger.s4_analysis
 	$(PY) -m pytest -q tests/test_s4.py
@@ -83,4 +83,7 @@ report:
 p2-t1 p2-t2 p2-t3 p2-t4 p2-t5:
 	$(TODO)
 
-all: s0 check-sample test p1-s1 p1-s2 p1-s3 p1-s4 p1-s5 p1-s6 p2-t1 p2-t2 p2-t3 p2-t4
+# P1 전체. P2 단계는 구현한 뒤 all에 넣는다 (사용자 결정 2026-11-16)
+p1-all: s0 check-sample p1-s1 p1-s2 p1-s3 p1-s4 p1-s5 p1-s6 test
+
+all: p1-all

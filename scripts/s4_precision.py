@@ -1,6 +1,6 @@
 """A6 수작업 검증의 정밀도 (docs/PLAN_P1.md §5 A6). 사용자가 라벨을 채운 뒤 실행한다.
 
-입력: outputs/validation/sample_60.csv
+입력: outputs/validation/sample_60.user_reviewed.csv (최종 라벨, 저장소에 있음)
   label_type_correct  : Y / N / 모름 (기준은 outputs/validation/LABELING.md)
   label_date_correct  : Y / N / 모름, 날짜가 없는 행은 비움
   label_note          : 판정 근거
@@ -115,7 +115,7 @@ def review_diff(rows):
 
 
 def main(path=None):
-    path = Path(path) if path else ROOT / "outputs/validation/sample_60.csv"
+    path = Path(path) if path else ROOT / "outputs/validation/sample_60.user_reviewed.csv"
     with path.open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     missing = [r["sample_id"] for r in rows if (r.get("label_type_correct") or "").strip() == ""]

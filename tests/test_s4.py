@@ -162,7 +162,7 @@ def test_a1_denominator_excludes_censored_unverifiable_moot(con):
 @db
 def test_sample_60(con):
     import pandas as pd
-    s = pd.read_csv(ROOT / "outputs/validation/sample_60.csv", dtype=str)
+    s = pd.read_csv(ROOT / "outputs/validation/sample_60.user_reviewed.csv", dtype=str)   # 저장소에 있는 최종 라벨
     assert len(s) == 61 and s["record_id"].is_unique          # 고정 60 + 추가 1 (sample_id 61, DECISIONS 2026-11-15)
     assert (s["product_code"] == "654700150").any()
     # 라벨: 비어 있거나(처음 만든 표본) Y / N / 모름, labeler는 claude / user_reviewed, label_source는 raw / external
@@ -185,7 +185,7 @@ def test_sample_deterministic(tmp_path):
         a = S4.build_sample(c)
         b = S4.build_sample(c)
         # 라벨 단 표본은 같은 기록·같은 sample_id로 고정해 다시 채운다 (DECISIONS 2026-11-15)
-        saved = __import__("pandas").read_csv(ROOT / "outputs/validation/sample_60.csv", dtype=str)
+        saved = __import__("pandas").read_csv(ROOT / "outputs/validation/sample_60.user_reviewed.csv", dtype=str)
         f = S4.build_sample(c, frozen=saved[["sample_id", "record_id"]])
     finally:
         c.close()
@@ -194,10 +194,10 @@ def test_sample_deterministic(tmp_path):
 
 
 def test_labeled_sample_not_overwritten(tmp_path, monkeypatch):
-    """라벨이 있는 sample_60.csv는 덮어쓰지 않고 sample_60.new.csv에 쓴다"""
+    """라벨이 있는 sample_60.user_reviewed.csv는 덮어쓰지 않고 sample_60.new.csv에 쓴다. 없으면 sample_60.generated.csv"""
     import pandas as pd
     from pbd.ledger import s4_analysis as S4
-    (tmp_path / "sample_60.csv").write_text("sample_id,record_id,ledger_claim,label_type_correct,label_date_correct,label_note\n1,r1,old,Y,,\n", encoding="utf-8")
+    (tmp_path / "sample_60.user_reviewed.csv").write_text("sample_id,record_id,ledger_claim,label_type_correct,label_date_correct,label_note\n1,r1,old,Y,,\n", encoding="utf-8")
     monkeypatch.setattr(S4, "VAL", tmp_path)
     monkeypatch.setattr(S4, "OUT", tmp_path / "s4")
     monkeypatch.setattr(S4, "build_a1", lambda con: {})
@@ -215,10 +215,14 @@ def test_labeled_sample_not_overwritten(tmp_path, monkeypatch):
                     return pd.DataFrame({"y": [1]})
             return R()
     S4.write_all(C())
-    assert (tmp_path / "sample_60.csv").read_text(encoding="utf-8").startswith("sample_id,record_id,ledger_claim,label_type_correct")
-    assert "Y" in (tmp_path / "sample_60.csv").read_text(encoding="utf-8")
+    labeled = (tmp_path / "sample_60.user_reviewed.csv").read_text(encoding="utf-8")
+    assert labeled == "sample_id,record_id,ledger_claim,label_type_correct,label_date_correct,label_note\n1,r1,old,Y,,\n"
     new = pd.read_csv(tmp_path / "sample_60.new.csv", dtype=str)
     assert new.loc[0, "label_type_correct"] == "Y" and new.loc[0, "claim_changed"] == "True"   # 라벨을 옮겨 붙이고 바뀐 주장을 표시
+    # 라벨 파일이 없으면 새 표본은 generated에만 쓰고 최종 라벨 파일을 만들지 않는다
+    (tmp_path / "sample_60.user_reviewed.csv").unlink()
+    S4.write_all(C())
+    assert (tmp_path / "sample_60.generated.csv").exists() and not (tmp_path / "sample_60.user_reviewed.csv").exists()
 
 
 

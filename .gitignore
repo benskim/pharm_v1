@@ -1,4 +1,7 @@
 *.csv
+# 라벨 표본은 저장소에 둔다 (사용자 결정 2026-11-16)
+!outputs/validation/sample_60.user_reviewed.csv
+!outputs/validation/sample_60.claude_labeled.csv
 *\.pyc
 *\.pyd
 *.DS_Store

@@ -56,7 +56,7 @@
 - 비가중: Y / (Y + N), Wilson 95%.
 - 층 크기 가중: 층 h의 라벨 행마다 가중치 (층 크기 N_h) / (그 층의 Y·N 행 수 n_h). 구간은 유효 표본 크기 n_eff = (Σw)² / Σw²로 Wilson 95%.
 - 표본은 50개 층에 최소 1건씩 배분해서 큰 층(예: 비고 없는 가격 변경 9,412건)은 표본이 적다. 비가중 정밀도는 작은 층 쪽으로 쏠리므로 두 값을 함께 본다.
-- `sample_60.csv`는 `make p1-s4`로 다시 만들 수 있다 (시드 고정, 같은 60행). **라벨을 채운 파일은 덮어쓰지 않도록 따로 복사해 두고**, 다시 만든 뒤에는 라벨을 옮겨 붙인다.
+- 파일 (2026-11-16 사용자 결정): 최종 라벨 `sample_60.user_reviewed.csv`, 1차(Claude) 라벨 `sample_60.claude_labeled.csv`. 둘 다 저장소에 있다. S4 시험·정밀도 계산(`make p1-s4-precision`)은 user_reviewed 파일을 읽는다. `make p1-s4`는 이 파일을 덮어쓰지 않고, 같은 기록으로 다시 채운 표본을 `sample_60.new.csv`에 (최종 라벨 파일이 없으면 새 표본을 `sample_60.generated.csv`에) 쓴다. 아래의 `sample_60.csv`는 지금 user_reviewed 파일을 가리킨다.
 
 ## 1차 라벨(claude)에서 쓴 판단 기준 (2026-11-15, 검토 대상)
 - 원자료 = `data/raw/benefit/`·`data/raw/substitute/`의 parquet와 `data/raw/master/` code_map을 **직접** 조회했다 (파이프라인 표 stg_*·event_ledger를 쓰지 않음). 근거는 행마다 `label_note`.

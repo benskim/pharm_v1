@@ -1,6 +1,7 @@
 """P1 S4: 분석 A (docs/PLAN_P1.md §5 A1~A6).
 
-data/interim/pbd.duckdb의 S2·S3 표에서 outputs/s4/*.csv와 outputs/validation/sample_60.csv를 만든다.
+data/interim/pbd.duckdb의 S2·S3 표에서 outputs/s4/*.csv와 검증 표본을 만든다. 라벨을 채운 최종 표본 outputs/validation/sample_60.user_reviewed.csv(저장소에 있음)는
+덮어쓰지 않는다: 그 파일이 있으면 같은 기록으로 다시 채워 sample_60.new.csv에, 없으면 새 표본을 sample_60.generated.csv에 쓴다.
 - A1 실현율: 신호 유형 × 연도 × product_role(대조약 / 생동인정 / 모름). 분모 = 전체 − censored − unverifiable − moot.
   실현 = realized + realized_partial (금액·날짜가 다른 실현 포함), 엄격 실현 = realized만. Wilson 95% 구간.
   not_realized는 reason_source(data / data+external / external)별 건수. DELISTING_SCHEDULED는 건수만.
@@ -347,6 +348,8 @@ def extra_draw(con, stratum: str, exclude: set[str], seed: int | None = None) ->
     return ids[0]
 
 
+LABELED_NAME = "sample_60.user_reviewed.csv"   # 최종 라벨 (1차 Claude 라벨은 sample_60.claude_labeled.csv)
+
 def write_all(con) -> dict[str, pd.DataFrame]:
     OUT.mkdir(parents=True, exist_ok=True)
     tabs = build_a1(con)
@@ -358,10 +361,11 @@ def write_all(con) -> dict[str, pd.DataFrame]:
     tabs["a5_compare_by_year"] = con.execute("select * exclude (n_check) from s3_compare_by_year order by year, event_type").df()
     for name, df in tabs.items():
         _dump(df, OUT / f"{name}.csv")
-    target = VAL / "sample_60.csv"
+    labeled = VAL / LABELED_NAME                    # 라벨을 채운 최종 표본 (사용자 결정 2026-11-16: 저장소에 두고 덮어쓰지 않는다)
+    target = VAL / "sample_60.generated.csv"
     sample = None
-    if target.exists():                             # 라벨을 채운 파일은 덮어쓰지 않는다
-        old = pd.read_csv(target, dtype=str)
+    if labeled.exists():
+        old = pd.read_csv(labeled, dtype=str)
         labs = [c for c in LABEL_COLS if c in old.columns]
         if labs and old[labs].notna().any().any():
             # 같은 기록으로 고정해 다시 채우고 라벨을 옮겨 붙인다. 원장 주장이 바뀐 행은 claim_changed (다시 판정)
@@ -377,7 +381,7 @@ def write_all(con) -> dict[str, pd.DataFrame]:
                     sample[c] = sample["record_id"].map(keep[c]).fillna("")
             sample["claim_changed"] = sample["record_id"].map(keep["ledger_claim"]).fillna("(새 기록)") != sample["ledger_claim"]
             target = VAL / "sample_60.new.csv"
-            print(f"sample_60.csv에 라벨이 있어 같은 기록으로 다시 채워 {target.name}에 썼다 (원장 주장이 바뀐 행 {int(sample['claim_changed'].sum())})")
+            print(f"{LABELED_NAME}에 라벨이 있어 같은 기록으로 다시 채워 {target.name}에 썼다 (원장 주장이 바뀐 행 {int(sample['claim_changed'].sum())})")
     if sample is None:
         sample = build_sample(con)
     _dump(sample, target)
