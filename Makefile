@@ -65,11 +65,19 @@ p1-s5:
 	$(PY) -m pbd.ledger.s5_market
 	$(PY) -m pytest -q tests/test_s5.py
 
-p1-s6 p1-s7:
+# P1 S6: 월간 리포트 예시 2개 (2024-09, 2025-11) → outputs/reports/, outputs/dashboard/
+p1-s6:
+	$(PY) -m pbd.ledger.s6_report 2024-09
+	$(PY) -m pbd.ledger.s6_report 2025-11
+	$(PY) -m pytest -q tests/test_s6.py
+
+p1-s7:
 	$(TODO)
 
+# 한 달 리포트: make report MONTH=YYYY-MM (MONTH까지의 스냅샷만 쓴다)
 report:
-	$(TODO)
+	@test -n "$(MONTH)" || (echo "사용: make report MONTH=YYYY-MM"; exit 1)
+	$(PY) -m pbd.ledger.s6_report $(MONTH)
 
 p2-t1 p2-t2 p2-t3 p2-t4 p2-t5:
 	$(TODO)

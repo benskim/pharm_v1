@@ -1,6 +1,11 @@
 # 분석 파라미터. 바꾸면 docs/DECISIONS.md에 기록한다.
 seed: 20261114
 
+# 사용통계 공개 시차(개월): 처방 연월 M의 사용통계를 쓸 수 있는 첫 리포트 달 − M. P1 S6 리포트와 P2가 같은 값을 쓴다.
+# null = 미정 (원자료 파일명에는 연 단위 묶음의 현재 판 공개일만 있고 달별 첫 공개일이 없다, DECISIONS 2026-11-16).
+# 미정이면 리포트는 0개월로 계산하고 "공개 시차 미정"을 표시한다.
+usage_lag_months: &usage_lag null
+
 p1:
   start_month: "2022-01"
   end_month: "2025-12"
@@ -19,7 +24,7 @@ p2:
   target: "claim_qty"            # 원외 청구수량. 보조: claim_cnt
   covid_months: ["2020-01", "2021-12"]
   flu_season_months: [11, 12, 1, 2, 3]
-  usage_publication_lag_months: [0, null]   # null 자리는 사용자가 정한다
+  usage_publication_lag_months: [0, *usage_lag]   # 둘째 값 = 위 usage_lag_months (P1과 같은 값)
   quantiles: [0.5, 0.9]
   order_sim:
     review_period_months: 1
