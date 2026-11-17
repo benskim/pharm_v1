@@ -68,7 +68,8 @@ def build_b1_pairs(con) -> pd.DataFrame:
                     join product_state_month b on b.list_month = c.m1 and b.product_code = a.product_code and b.c4 = a.c4),
              pairs as (select c4, month, count(*) n_both,
                               count(*) filter (where s0 = 'reimbursed' and s1 = 'reimbursed' and p0 > 0 and p1 > 0) n_basket,
-                              avg(ln(p1 / p0)) filter (where s0 = 'reimbursed' and s1 = 'reimbursed' and p0 > 0 and p1 > 0) dlog_list,
+                              -- 소수 12자리 반올림: 병렬 집계의 덧셈 순서로 끝자리가 달라지지 않게 (같은 입력 → 같은 출력, 2026-11-17)
+                              round(avg(ln(p1 / p0)) filter (where s0 = 'reimbursed' and s1 = 'reimbursed' and p0 > 0 and p1 > 0), 12) dlog_list,
                               count(*) filter (where s0 = 'reimbursed' and s1 = 'reimbursed' and p0 > 0 and p1 > 0 and p1 <> p0) n_changed
                        from pr group by 1, 2),
              -- 월 중간에 적용된 가격 변경: 유효일이 전월 또는 그 달 안이고 1일이 아님 → 사용통계의 두 달에 나뉘어 들어간다
@@ -84,7 +85,7 @@ def build_b1_pairs(con) -> pd.DataFrame:
         select p.*, c.m0 prev_month,
                coalesce(u0.observed_out, false) obs0, coalesce(u1.observed_out, false) obs1,
                (select count(*) from usage_c4_month z where z.c4 = p.c4 and z.observed_out) n_obs_months,
-               ln(q1.up / q0.up) dlog_up, q0.amt amt0, q1.amt amt1,
+               round(ln(q1.up / q0.up), 12) dlog_up, q0.amt amt0, q1.amt amt1,   -- 청구수량 합(실수)의 끝자리 차이를 막는 반올림
                mid.c4 is not null mid_month_change, coalesce(comp.n_comp, 0) n_comp, coalesce(ld.n_ld, 0) n_listing_delisting
         from pairs p join cal c on c.m1 = p.month
         left join usage_c4_month u0 on u0.c4 = p.c4 and u0.month = c.m0
@@ -156,7 +157,7 @@ def b1_effective_pairs(con, pairs: pd.DataFrame) -> pd.DataFrame:
     con.register("_peff", psm[["product_code", "list_month", "c4", "state_asof", "p_eff"]])
     x = con.execute("""with cal as (select prev_month m0, list_month m1 from s3_cal where prev_month is not null)
         select a.c4, c.m1 as month,
-               avg(ln(b.p_eff / a.p_eff)) dlog_list_eff,
+               round(avg(ln(b.p_eff / a.p_eff)), 12) dlog_list_eff,      -- 소수 12자리 반올림 (병렬 집계 끝자리, 2026-11-17)
                count(*) filter (where abs(ln(b.p_eff / a.p_eff)) > 1e-12) n_changed_eff
         from cal c join _peff a on a.list_month = c.m0
         join _peff b on b.list_month = c.m1 and b.product_code = a.product_code and b.c4 = a.c4
