@@ -4,7 +4,7 @@ export PYTHONPATH := src
 
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
-        p2-t1 p2-t2 p2-t3 p2-t4 p2-t5 all
+        p2-t1 p2-t2 p2-t3 p2-min p2-t4 p2-t5 all
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -92,7 +92,22 @@ report:
 	@test -n "$(MONTH)" || (echo "사용: make report MONTH=YYYY-MM"; exit 1)
 	$(PY) -m pbd.ledger.s6_report $(MONTH)
 
-p2-t1 p2-t2 p2-t3 p2-t4 p2-t5:
+# P2 최소판 (주력 묶음 성분 × 전국, M0·M2·M3, 예측 대상 M+1). T1 → T2 → T3 순서
+p2-t1:
+	$(PY) -m pbd.forecast.t1_panel
+	$(PY) -m pytest -q tests/test_p2_t1.py
+
+p2-t2:
+	$(PY) -m pytest -q tests/test_p2_t2.py
+	$(PY) -m pbd.forecast.t2_baseline
+
+p2-t3:
+	$(PY) -m pytest -q tests/test_p2_t3.py tests/test_p2_posthoc.py
+	$(PY) -m pbd.forecast.t3_models
+
+p2-min: p2-t1 p2-t2 p2-t3
+
+p2-t4 p2-t5:
 	$(TODO)
 
 # P1 전체. P2 단계는 구현한 뒤 all에 넣는다 (사용자 결정 2026-11-16)
