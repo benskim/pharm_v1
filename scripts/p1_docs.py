@@ -248,9 +248,11 @@ def p2_row(N) -> str:
     if c is None:
         return base + "결과 없음 |"
     r = c[(c.lag == 5)].set_index(["a", "b"])
-    m32, m20 = r.loc[("M3", "M2")], r.loc[("M2", "M0")]
-    return (base + f"공개 시차 5개월(주)에서 전역 모델 M2 MASE {m20.mase_a:.3f}는 12개월 전 값 M0 {m20.mase_b:.3f}보다 나빴고, "
-            f"신호를 넣은 M3 {m32.mase_a:.3f}는 M2보다 나빴다 (개선 없음). [P2 결과](P2_min_result.md), 설계 [PLAN_P2](../docs/PLAN_P2.md) |")
+    m20 = r.loc[("M2", "M0")]
+    rep = (ROOT / "reports/P2_min_result.md").read_text(encoding="utf-8")
+    concl = next(x for x in rep.splitlines() if x.startswith("**결론**: ")).removeprefix("**결론**: ")   # 고정 결론 (한 곳에서만 정의)
+    return (base + f"{concl} 공개 시차 5개월(주)에서 전역 모델 M2 MASE {m20.mase_a:.3f}는 12개월 전 값 M0 {m20.mase_b:.3f}보다 나빴다. "
+            "[P2 결과](P2_min_result.md), 설계 [PLAN_P2](../docs/PLAN_P2.md) |")
 
 
 def limitations_block(N) -> str:

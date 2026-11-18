@@ -90,6 +90,6 @@ A = 실현 계열 ÷ (전체 − 판정 제외 − 관측 기간 부족), 집행
 | 의약품 시장 전반에 대한 분석, 보고서 설계 및 자동화 | 월간 리포트 [`s6_report.py`](../src/pbd/ledger/s6_report.py), 예시 [2024-09](../outputs/reports/P1_report_2024-09.md) · [2025-11](../outputs/reports/P1_report_2025-11.md) |
 | 가설 검증을 통해 잠재적 이슈를 계량화하고 해결 방안을 도출 | 신호 원장 [`v5_rules.py`](../src/pbd/ledger/v5_rules.py), 지표·결말 [v5.3 결과](P1_rules_v5_3_result.md), 정밀도 [holdout](P1_holdout_precision.md) |
 | 심평원 빅데이터 및 처방 데이터 활용 (우대) | 심평원 급여목록 × 건보공단 사용통계: [DATA](../docs/DATA.md), [S5 보고](P1_S5_result.md) |
-| 약국 구매, 판매, 사용 패턴 분석 기반 예측 모델 개발 | 약국 단위 구매·판매 자료는 없다. 대신 성분 × 전국 원외 청구수량 예측(P2 최소판). 공개 시차 5개월(주)에서 전역 모델 M2 MASE 1.202는 12개월 전 값 M0 0.923보다 나빴고, 신호를 넣은 M3 1.350는 M2보다 나빴다 (개선 없음). [P2 결과](P2_min_result.md), 설계 [PLAN_P2](../docs/PLAN_P2.md) |
+| 약국 구매, 판매, 사용 패턴 분석 기반 예측 모델 개발 | 약국 단위 구매·판매 자료는 없다. 대신 성분 × 전국 원외 청구수량 예측(P2 최소판). 이 설정(성분 32개, 신호가 0이 아닌 칸 2~11%, 전국 단위)에서는 선행 신호 특징이 예측을 개선하지 못했고, 주입 시험에서 20% 효과도 일부만 검출되어 신호 효과를 검출할 힘이 부족했다. 공개 시차 5개월(주)에서 전역 모델 M2 MASE 1.202는 12개월 전 값 M0 0.923보다 나빴다. [P2 결과](P2_min_result.md), 설계 [PLAN_P2](../docs/PLAN_P2.md) |
 | SQL, Python | DuckDB SQL과 Python, 시험 [`tests/`](../tests/), 재현 [REPRODUCE_LOG](../docs/REPRODUCE_LOG.md) |
 | Tableau, Power BI (우대) | 대시보드용 CSV `outputs/dashboard/YYYY-MM/` (기준 시점 칸 포함). 대시보드 자체는 만들지 않았다 |

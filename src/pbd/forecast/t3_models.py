@@ -1,14 +1,14 @@
-"""P2 T3 (최소판): M2·M3 롤링 평가, M3 대 M2 검정, 가상 재고 시뮬레이션(비용 비율 하나).
+"""P2 T3 (최소판): M2·M3 롤링 평가, M3 대 M2 검정, 가상 재고 시뮬레이션.
 
 - 모델: M0(T2), M2(신호 없음), M3(신호 특징, 기준 스냅샷 s = M, 주), M3p(s = M − 1, 보수적 민감도). 같은 하이퍼파라미터·시드.
-- lag = 0, 3, 5 (t2_baseline.LAGS). origin 2023-01 ~ 2025-11, 예측 대상 M+1.
-- 검정: 성분별 평균 척도 오차(MASE) 차이 M3 − M2에 부호 검정과 Wilcoxon 부호 순위 검정. p ≥ 0.05면 "차이 없음".
+- lag = 5(주), 0(참고) (t2_baseline.LAGS, lag 3은 제외 — 사용자 결정 2026-11-18). origin 2023-01 ~ 2025-11, 예측 대상 M+1.
+- 검정: 성분별 평균 척도 오차(MASE) 차이 M3 − M2에 부호 검정과 Wilcoxon 부호 순위 검정, Holm 보정. p ≥ 0.05면 "차이 없음".
 - 가상 재고 시뮬레이션 (전국 성분 단위, 약국 재고가 아니다): 매달 목표 재고 S를 두고 실제 수요 D(사용통계 실측)를 맞는다.
-  달마다 독립(이월 없음), 리드타임 1개월 = origin M에 정한 S가 M+1에 쓰인다. 결품 비용 / 재고 비용 = 3 (가정값,
-  params order_sim.cost_ratios의 가운데 값) → 분위 τ = 3 / (1 + 3) = 0.75. 기준 정책 S = M0 × (1 + 0.1) (안전계수 0.1은 가정값).
-  예측 정책 S = M2 / M3의 0.75 분위 예측(LightGBM quantile). 분위에 맞춘 기준 M0 P75 = y_{t−12} × 과거 계절 비율의 0.75 분위
-  (검토 a10). 포함률(실수요 ≤ S인 칸 비율)을 함께 낸다 (0.75 근처면 분위가 맞다).
-사용: python -m pbd.forecast.t3_models  (make p2-t3)
+  달마다 독립(이월 없음), 리드타임 1개월 = origin M에 정한 S가 M+1에 쓰인다. 결품 비용 / 재고 비용 = 1, 3, 9 (가정값,
+  params order_sim.cost_ratios) → 분위 τ = c / (1 + c) = 0.5, 0.75, 0.9. 기준 정책 S = M0 × (1 + 0.1) (안전계수 0.1은 가정값).
+  예측 정책 S = M2 / M3의 τ 분위 예측(LightGBM quantile). 분위 형태의 기준 M0 분위 = y_{t−12} × 과거 계절 비율의 τ 분위
+  (검토 a10). 포함률(실수요 ≤ S인 칸 비율)을 함께 낸다 (τ 근처면 분위가 맞다).
+사용: python -m pbd.forecast.t3_models [claim_amt]  (make p2-t3)
 """
 from __future__ import annotations
 
@@ -24,8 +24,7 @@ from pbd.forecast import signals as S
 from pbd.forecast.t2_baseline import LAGS, ORIGINS, load, table
 
 OUT = ROOT / "outputs/p2"
-COST_RATIO = R.P["order_sim"]["cost_ratios"][1]
-TAU = COST_RATIO / (1 + COST_RATIO)
+COST_RATIOS = tuple(R.P["order_sim"]["cost_ratios"])     # 결품 비용 / 재고 비용 = 1, 3, 9 (가정값) → 분위 τ = 0.5, 0.75, 0.9
 SAFETY = 0.1
 ALPHA = 0.05
 
@@ -69,15 +68,15 @@ def order_sim(stock: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     d["left"] = (d["s"] - d["d"]).clip(lower=0)
     days = d["target"].map(lambda m: calendar.monthrange(int(m[:4]), int(m[5:7]))[1])
     d["inv_days"] = d["left"] / (d["d"] / days)
-    d["cost"] = d["left"] + COST_RATIO * d["short"]
+    d["cost"] = d["left"] + d["cr"] * d["short"]
     rows = []
-    for (lag, pol), g in d.groupby(["lag", "policy"]):
-        rows.append(dict(lag=lag, policy=pol, n=len(g), coverage=(g["d"] <= g["s"]).mean(), shortage_rate=g["short"].sum() / g["d"].sum(),
+    for (lag, cr, pol), g in d.groupby(["lag", "cr", "policy"]):
+        rows.append(dict(lag=lag, cost_ratio=cr, tau=cr / (1 + cr), policy=pol, n=len(g), coverage=(g["d"] <= g["s"]).mean(), shortage_rate=g["short"].sum() / g["d"].sum(),
                          stockout_cells=(g["short"] > 0).mean(), avg_inventory_days=g["inv_days"].mean(),
                          cost_rel=g["cost"].sum()))
     r = pd.DataFrame(rows)
-    base = r[r["policy"] == "기준 M0×1.1"].set_index("lag")["cost_rel"]
-    r["cost_rel"] = r["cost_rel"] / r["lag"].map(base)
+    base = r[r["policy"] == "기준 M0×1.1"].set_index(["lag", "cost_ratio"])["cost_rel"]
+    r["cost_rel"] = r["cost_rel"] / [base[(l, c)] for l, c in zip(r["lag"], r["cost_ratio"])]
     return r
 
 
@@ -98,13 +97,16 @@ def main(target: str = "claim_qty") -> None:
             preds.append(R.rolling(panel, fn, ORIGINS, lag, series, cls=cls, **kw).assign(model=name))
             print(f"lag {lag} {name} 끝", flush=True)
         m0 = preds[-4]
-        stocks.append(m0.assign(s=m0["yhat"] * (1 + SAFETY), policy="기준 M0×1.1")[["c4", "target", "origin", "lag", "s", "policy"]])
-        q0 = R.rolling(panel, R.m0_quantile, ORIGINS, lag, series, q=TAU)
-        stocks.append(q0.assign(s=q0["yhat"], policy=f"M0 P{int(TAU * 100)}")[["c4", "target", "origin", "lag", "s", "policy"]])
-        for name, kw in (("M2", {}), ("M3", dict(feat=f_same))):
-            q = R.rolling(panel, R.gbm, ORIGINS, lag, series, cls=cls, quantile=TAU, **kw)
-            stocks.append(q.assign(s=q["yhat"], policy=f"{name} P{int(TAU * 100)}")[["c4", "target", "origin", "lag", "s", "policy"]])
-            print(f"lag {lag} {name} 분위 끝", flush=True)
+        cols = ["c4", "target", "origin", "lag", "s", "policy", "cr"]
+        for cr in COST_RATIOS:
+            tau = cr / (1 + cr)
+            stocks.append(m0.assign(s=m0["yhat"] * (1 + SAFETY), policy="기준 M0×1.1", cr=cr)[cols])
+            q0 = R.rolling(panel, R.m0_quantile, ORIGINS, lag, series, q=tau)
+            stocks.append(q0.assign(s=q0["yhat"], policy="M0 분위", cr=cr)[cols])
+            for name, kw in (("M2", {}), ("M3", dict(feat=f_same))):
+                q = R.rolling(panel, R.gbm, ORIGINS, lag, series, cls=cls, quantile=tau, **kw)
+                stocks.append(q.assign(s=q["yhat"], policy=f"{name} 분위", cr=cr)[cols])
+                print(f"lag {lag} 비용 비율 {cr} {name} 분위 끝", flush=True)
     pred = pd.concat(preds, ignore_index=True)
     sc = R.score(pred, panel, scale)
     sc["flu"] = sc["target"].str[5:7].astype(int).isin(R.P["flu_season_months"])

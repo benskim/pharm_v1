@@ -1,5 +1,5 @@
 """P2 최소판 결과 보고서 생성: outputs/p2/*.csv → reports/P2_min_result.md. 숫자는 모두 CSV에서 읽는다 (손으로 옮기지 않는다).
-주 결과 = 공개 시차 lag 5, 예측 대상 M+1 (PLAN_P2 §3·§5, 사용자 지시 1·2). lag 0·3은 부록.
+주 결과 = 공개 시차 lag 5, 예측 대상 M+1 (PLAN_P2 §3·§5, 사용자 결정 2026-11-18). lag 0은 참고(부록 A), lag 3은 제외. 여섯 달은 부록 B.
 사용: python -I scripts/p2_min_report.py
 """
 from __future__ import annotations
@@ -14,7 +14,9 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 O = ROOT / "outputs/p2"
 MAIN = 5
-APPX = (0, 3)
+APPX = (0,)
+CONCLUSION = ("이 설정(성분 32개, 신호가 0이 아닌 칸 2~11%, 전국 단위)에서는 선행 신호 특징이 예측을 개선하지 못했고, "
+              "주입 시험에서 20% 효과도 일부만 검출되어 신호 효과를 검출할 힘이 부족했다.")   # 사용자가 고정한 결론 (2026-11-18)
 MODELS = ("M0", "M2", "M3", "M3p")
 
 
@@ -46,6 +48,10 @@ def main() -> None:
     exi = pd.read_csv(O / "exp_inject.csv")
     exm = pd.read_csv(O / "exp_mase_by_model.csv").set_index("lag")
     e1c = pd.read_csv(O / "exp_e1_constant.csv").set_index("lag")
+    hor = pd.read_csv(O / "t3_horizons.csv")
+    dgc = pd.read_csv(O / "diag_compare.csv")
+    dgv = pd.read_csv(O / "diag_coverage.csv").set_index("lag")
+    dgm = pd.read_csv(O / "diag_mase.csv").set_index("lag")
     L: list[str] = []
     w = L.append
     tot = err[err["part"] == "전체"].pivot_table(index="model", columns="lag", values=["mase", "wape"])
@@ -55,11 +61,16 @@ def main() -> None:
     w("# P2 최소판 결과 (T1 · T2 · T3)\n")
     w("> 숫자는 `scripts/p2_min_report.py`가 `outputs/p2/`의 CSV(이번 실행 산출, 표마다 출처를 적음)에서 읽어 쓴 것이다. "
       "설계: [PLAN_P2](../docs/PLAN_P2.md) §7 최소판, 결정: [DECISIONS](../docs/DECISIONS.md) \"P2 최소판\", 검토: [REVIEW](REVIEW_2026-11-18.md)·[WORKLOG](WORKLOG_2026-11-18.md).\n")
-    w("**주 결과 (공개 시차 5개월, 예측 대상 = 발간월 M의 다음 달 M+1)**: 전역 모델 M2의 MASE "
+    nzr = fe.groupby("lag")["has_signal"].mean()
+    assert 0.015 <= nzr.min() and nzr.max() <= 0.115, f"고정 결론의 '2~11%'와 계산값이 다르다: {nzr.to_dict()}"
+    assert len(tgt) == 32, "고정 결론의 '성분 32개'와 대상 수가 다르다"
+    w(f"**결론**: {CONCLUSION}\n")
+    w("**주 결과의 숫자 (공개 시차 5개월, 예측 대상 = 발간월 M의 다음 달 M+1)**: 전역 모델 M2의 MASE "
       f"{m20.mase_a:.3f}는 12개월 전 값 M0 {m20.mase_b:.3f}보다 나빴다 (M2가 나은 성분 {int(m20.a_better_series)}/{int(m20.n_series)}). "
       f"P1 신호 특징을 넣은 M3 {m32.mase_a:.3f}는 M2보다 나빴다 (M3가 나은 성분 {int(m32.a_better_series)}/{int(m32.n_series)}, Holm 보정 뒤 판정: {m32.verdict_holm}). "
-      "**신호를 넣어 예측이 나아지지 않았다.** 이 악화의 약 절반은 신호 내용이 아니라 신호 열의 결측 구조(2022 이전 NaN)가 만든 시기 표시에서 왔다(§5). "
-      "공개 시차를 0으로 둔 이상적 가정(부록)에서만 M2가 M0보다 나았다.\n")
+      "이 악화의 약 절반은 신호 내용이 아니라 신호 열의 결측 구조(2022 이전 NaN)가 만든 시기 표시에서 왔다(§5). "
+      "신호가 0이 아닌 칸 비율은 " + ", ".join(f"lag {k} {pct(v)}" for k, v in nzr.items()) + f" ({src('t3_features.csv')}). "
+      "공개 시차를 0으로 둔 이상적 가정(부록 A)에서만 M2가 M0보다 나았다.\n")
 
     w("## 먼저 읽을 한계\n")
     w("- **전국 성분 단위의 원외 청구수량 예측**이다. 약국 단위 구매·재고·판매, 제품별 판매량, 도매 유통은 데이터에 없다.")
@@ -82,11 +93,11 @@ def main() -> None:
 
     w("## 가상 재고 시뮬레이션의 가정 (지시 4, 결과보다 먼저)\n")
     w("- **전국 성분 단위 가상 재고 시뮬레이션**이다. 약국 재고 최적화가 아니다. 시도 단위도 아니다(PLAN_P2 §6은 시도 × 성분).")
-    w("- 결품 비용 / 재고 비용 = **3 (가정값)** → 목표 재고 = 0.75 분위 예측. 비용 비율 다른 값(1, 9)은 돌리지 않았다.")
+    w("- 결품 비용 / 재고 비용 = **1, 3, 9 (가정값)** → 목표 재고 = 분위 τ = 0.5, 0.75, 0.9 예측. 비용 비율마다 따로 학습한다.")
     w("- **달마다 독립(이월 없음)**: 그 달 목표 재고 S로 그 달 수요 D를 맞고, 남은 재고는 다음 달로 넘기지 않는다. PLAN_P2 §6의 '발주 = 목표 − 현재 재고'와 다르다.")
     w("- 리드타임 1개월 = origin M에 정한 S가 M+1에 쓰인다. 실제 수요 = 사용통계 실측(수정본).")
-    w("- 정책: 기준 M0 × 1.1(안전계수 0.1, 가정값) / **M0 P75**(y_{t−12} × 과거 계절 비율 y_u/y_{u−12}의 0.75 분위. 분위 형태의 기준이지만 포함률은 보정하지 않았다. 비율 이력은 M − lag까지라 lag마다 값이 다르다) / M2 P75·M3 P75(LightGBM 분위 회귀). "
-      "포함률(실수요 ≤ S인 칸 비율)이 0.75 근처면 분위가 맞은 것이다.\n")
+    w("- 정책: 기준 M0 × 1.1(안전계수 0.1, 가정값) / **M0 분위**(y_{t−12} × 과거 계절 비율 y_u/y_{u−12}의 τ 분위. 분위 형태의 기준이지만 포함률은 보정하지 않았다. 비율 이력은 M − lag까지라 lag마다 값이 다르다) / M2 분위·M3 분위(LightGBM 분위 회귀). "
+      "포함률(실수요 ≤ S인 칸 비율)이 τ 근처면 분위가 맞은 것이다.\n")
 
     w("## 완료 기준별 통과 여부\n")
     w("| 단계 | 완료 기준 | 결과 |\n|---|---|---|")
@@ -133,11 +144,11 @@ def main() -> None:
 
     w("## 3. M3 대 M2, M2 대 M0 (검정)\n")
     w("성분별 평균 MASE 차이(a − b, 음수 = a가 나음)에 부호 검정·Wilcoxon 부호 순위 검정. 두 검정 모두 p < 0.05일 때 차이로 쓴다. "
-      "Holm 보정은 부호 검정과 Wilcoxon 검정에 따로, 각각 이 표의 비교 9개(3 lag × 3 비교)를 한 묶음으로 했다. Holm 뒤 판정 = 보정된 두 p가 모두 0.05 미만. "
-      "§4 금액 표는 그 표 9개, §5 진단 표는 진단 비교 33개(11 비교 × 3 lag)를 각각 한 묶음으로 보정했다. 상대 차이 = a MASE ÷ b MASE − 1.\n")
+      f"Holm 보정은 부호 검정과 Wilcoxon 검정에 따로, 각각 이 표의 비교 {len(cmp_)}개를 한 묶음으로 했다. Holm 뒤 판정 = 보정된 두 p가 모두 0.05 미만. "
+      f"§4 금액 표는 그 표 {len(amt)}개, §5 진단 표는 진단 비교 {len(exc)}개, §5b 표는 {len(dgc)}개를 각각 한 묶음으로 보정했다. 상대 차이 = a MASE ÷ b MASE − 1.\n")
     w("| lag | a − b | a MASE | b MASE | 상대 차이 | a가 나은 성분 | 부호 p | Wilcoxon p | 부호 p (Holm) | Wilcoxon p (Holm) | 판정 | Holm 뒤 판정 |\n|---|---|---|---|---|---|---|---|---|---|---|---|")
     for x in cmp_.sort_values("lag", key=lambda k: k.map({MAIN: 0, 0: 1, 3: 2})).itertuples():
-        w(f"| {x.lag}{' (주)' if x.lag == MAIN else ''} | {x.a} − {x.b} | {x.mase_a:.3f} | {x.mase_b:.3f} | {100 * x.rel_diff:+.1f}% | {x.a_better_series}/{x.n_series} | "
+        w(f"| {x.lag}{' (주)' if x.lag == MAIN else ' (참고)'} | {x.a} − {x.b} | {x.mase_a:.3f} | {x.mase_b:.3f} | {100 * x.rel_diff:+.1f}% | {x.a_better_series}/{x.n_series} | "
           f"{x.sign_p:.4f} | {x.wilcoxon_p:.4f} | {x.sign_p_holm:.4f} | {x.wilcoxon_p_holm:.4f} | {x.verdict} | {x.verdict_holm} |")
     hs = fe.groupby("lag")["has_signal"].mean()
     nz = fe[["cut_frac", "susp_frac", "listing_n"]].gt(0).mean()
@@ -162,8 +173,8 @@ def main() -> None:
         w(f"| {x.lag} | {x.a} − {x.b} | {x.mase_a:.3f} | {x.mase_b:.3f} | {100 * x.rel_diff:+.1f}% | {x.a_better_series}/{x.n_series} | {x.verdict} | {x.verdict_holm} |")
     am = amt.set_index(["lag", "a", "b"]).loc[(MAIN, "M3", "M2")]
     w(f"\n{src('t3_compare_claim_amt.csv')}. **금액에서도 M3는 M2보다 나아지지 않았다** (lag {MAIN} {am.verdict_holm}, Holm 뒤). "
-      "목표 변수 불일치만으로는 설명되지 않는다. 다만 긍정 대조가 실패한 것은 '신호에 정보가 없다'는 증거가 아니다. "
-      "E6에서 일부러 넣은 20% 효과도 lag 3·5에서 일부만, lag 0에서는 잡지 못했으므로, 이 틀의 검정력이 모자란 것과 구분되지 않는다. "
+      "목표 변수 불일치만으로는 설명되지 않는다. 다만 긍정 대조가 실패한 것이 신호의 쓸모를 판정하지는 않는다. "
+      "E6에서 일부러 넣은 20% 효과도 일부만 검출됐으므로(§5), 이 틀의 검정력이 모자란 것과 구분되지 않는다. "
       "말할 수 있는 것은 '이 특징 정의와 이 모델에서는 금액 예측도 나아지지 않았다'까지다.\n")
 
     w("## 5. 진단 실험 (검토 b 항목, 주 모델은 바꾸지 않음)\n")
@@ -203,29 +214,52 @@ def main() -> None:
     w("**읽기 (lag 5)**: 신호 열을 모두 0으로 둔 E1이 M2와 같지 않았다. 2022-01 이전 pseudo-origin은 특징 행이 없어 NaN이고 이후는 값이 있으므로, "
       "신호 열이 내용 없이도 **'2022 이전 / 이후' 시기 표시**로 작동한다(검토 b5의 구조, 단 0이 아니라 NaN). "
       f"M3 − M2 {relp(MAIN, 'M3', 'M2'):+.1f}% 중 시기 표시(E1 − M2)가 {relp(MAIN, 'E1_null', 'M2'):+.1f}%, 시기 표시를 같게 둔 신호 내용(M3 − E1)이 {relp(MAIN, 'M3', 'E1_null'):+.1f}%다. "
-      f"(E1′로 확인). lag 0·3에서 M3 − E1은 {relp(0, 'M3', 'E1_null'):+.1f}%·{relp(3, 'M3', 'E1_null'):+.1f}%로 차이 없음이다. "
+      f"(E1′로 확인). lag 0에서 M3 − E1은 {relp(0, 'M3', 'E1_null'):+.1f}%({e.loc[(0, 'M3', 'E1_null'), 'verdict_holm']})다. "
       f"2022-02 이후 행으로만 학습하면(E4) lag 0에서 M3가 M2보다 나았다({relp(0, 'E4_M3_2022', 'E4_M2_2022'):+.1f}%, Holm 뒤 {e.loc[(0, 'E4_M3_2022', 'E4_M2_2022'), 'verdict_holm']}). "
       "다만 2022 이후 학습은 M2 자체를 크게 나쁘게 한다. 시드는 결과를 바꾸지 않았다(E0). "
       "합성 효과 주입(E6, 인하 예고가 있는 칸의 수량 20% 감소): 주입 칸 MASE M3 대 M2 = " + ", ".join(
           f"lag {l} {ei.loc[(l, 'E6_M3', True)]:.3f} 대 {ei.loc[(l, 'E6_M2', True)]:.3f}" for l in sorted(set(exi['lag'])))
-      + ". lag 3·5에서는 20% 효과를 일부 잡았고, 주입 칸이 27개뿐인 lag 0에서는 잡지 못했다. 주입 칸이 아닌 칸에서는 M3가 M2보다 나빴다. "
+      + ". " + "; ".join(f"lag {l}: 주입 칸 {int(exi[(exi.lag == l) & exi.injected & (exi.model == 'E6_M3')]['n'].iloc[0])}개, "
+                          + ("M3가 오차를 줄임(일부 검출)" if ei.loc[(l, 'E6_M3', True)] < ei.loc[(l, 'E6_M2', True)] else "M3가 오차를 줄이지 못함(검출 못 함)")
+                          for l in sorted(set(exi['lag'])))
+      + ". 주입 칸이 아닌 칸에서는 M3가 M2보다 나빴다. "
       "즉 이 틀은 20% 크기의 효과도 일부만 되찾는다. "
       "후보별 판정은 [WORKLOG](WORKLOG_2026-11-18.md) §2.\n")
-    w("**하지 않은 진단** (검토 b6·b9·b10·b11·b12 일부·b13): 특징 유효일 오프셋(정렬), 사후 이벤트를 넣은 오라클 상한, 특징 인코딩 비교, 대상 성분 확대, M2·M3 따로 튜닝, "
-      "origin 블록 부트스트랩, 시드 여러 개 분포. as-of 예측 비교는 origin 2개(2025-07·2025-10) × lag 0·5만 했다.\n")
+    w("**하지 않은 진단** (검토 b10·b11·b12 일부·b13): 특징 인코딩 비교, 대상 성분 확대, M2·M3 따로 튜닝, origin 블록 부트스트랩, 시드 여러 개 분포, 분위 포함률 보정. "
+      "as-of 예측 비교는 origin 2개(2025-07·2025-10) × lag 0·5만 했다. (b6 시점 이동·b9 오라클은 아래 §5b)\n")
+
+    w("## 5b. 오라클 상한(b9)과 특징 시점 이동(b6)\n")
+    w("- **오라클 M3o**: 신호 특징 대신 사후 원장의 실제 이벤트(창 안에 유효일이 있는 약가 변경(예고 여부 무관)·등재·삭제·급여중지)를 넣었다. **일부러 미래를 본 상한 실험**이다. "
+      "비교 기준은 같은 결측 구조를 가진 E1(신호 열 0)이다.")
+    w("- **시점 이동 M3(k)**: 신호 창을 k개월 옮겼다(a+1+k ~ t+k). 기준 스냅샷은 M 그대로라 누수가 아니다.\n")
+    w("| lag | a − b | a MASE | b MASE | 상대 차이 | a가 나은 성분 | Holm 뒤 판정 |\n|---|---|---|---|---|---|---|")
+    for x in dgc.sort_values(["lag", "a"], key=lambda k: k.map({MAIN: 0, 0: 1}) if k.name == "lag" else k, ascending=[True, True]).itertuples():
+        w(f"| {x.lag} | {x.a} − {x.b} | {x.mase_a:.3f} | {x.mase_b:.3f} | {100 * x.rel_diff:+.1f}% | {x.a_better_series}/{x.n_series} | {x.verdict_holm} |")
+    w(f"\n{src('diag_compare.csv', 'diag_mase.csv', 'diag_coverage.csv')}. 0이 아닌 칸 비율(특징표 전체): "
+      + ", ".join(f"lag {l} 오라클 {pct(r.oracle_nonzero)} / 신호 {pct(r.signal_nonzero)}" for l, r in dgv.iterrows()) + ".\n")
+    dg = dgc.set_index(["lag", "a", "b"])
+    for l in sorted(set(dgc["lag"]), key=lambda k: {MAIN: 0, 0: 1}.get(k, 2)):
+        o = dg.loc[(l, "M3o_oracle", "E1_null")]
+        offs = dgc[(dgc.lag == l) & dgc.a.str.startswith("M3_off")].copy()
+        offs["k"] = offs["a"].str.replace("M3_off", "").astype(int)
+        best = offs.sort_values("mase_a").iloc[0]
+        w(f"- lag {l}: 오라클 − E1 {100 * o.rel_diff:+.1f}% ({o.verdict_holm}), 같은 학습 기간(대상 달 2022-02~) 오라클 − M2 "
+          f"{100 * dg.loc[(l, 'M3o_oracle_2022', 'M2_2022')].rel_diff:+.1f}% ({dg.loc[(l, 'M3o_oracle_2022', 'M2_2022')].verdict_holm}). "
+          f"시점 이동 중 MASE가 가장 낮은 k = {int(best.k):+d} (MASE {best.mase_a:.3f}, k = 0은 {offs[offs.k == 0].mase_a.iloc[0]:.3f}).")
+    w("\n읽는 법: 오라클도 E1을 이기지 못하면, 신호가 완벽했더라도(실제 이벤트를 미리 알았더라도) 이 특징 정의와 이 모델에서는 수량 예측 개선의 여지가 작다. "
+      "오라클은 이기고 M3는 못 이기면 신호의 범위·시점 쪽이다. 가장 좋은 k가 0이 아니면 창 정렬을 의심한다. 결론 문장의 범위를 넘는 해석은 하지 않는다.\n")
 
     w(f"## 6. 가상 재고 시뮬레이션 결과 (lag {MAIN} 주, 가정은 위 절)\n")
-    w("| lag | 정책 | 칸 | 포함률 (목표 0.75) | 결품률(부족분 ÷ 수요) | 결품 칸 비율 | 평균 재고일수 | 상대 비용 (기준 M0×1.1 = 1) |\n|---|---|---|---|---|---|---|---|")
-    for x in sim.sort_values("lag", key=lambda k: k.map({MAIN: 0, 0: 1, 3: 2})).itertuples():
-        w(f"| {x.lag} | {x.policy} | {x.n} | {pct(x.coverage)} | {pct(x.shortage_rate)} | {pct(x.stockout_cells)} | {x.avg_inventory_days:.1f} | {x.cost_rel:.3f} |")
-    w(f"\n{src('t3_order_sim.csv')}. 예측 모델의 몫은 분위에 맞춘 기준(M0 P75)과 비교해 읽는다. 포함률이 0.75보다 높으면 분위 예측이 넓게(재고를 많이) 잡힌 것이다. "
-      "비용 비율이 가정값이라 정책 순위는 이 가정 아래의 것이다.\n")
-    w("**점 예측과 순서가 다른 이유**: lag 5에서 점 예측(MASE)은 M0가 M2보다 낫지만 재고 비용은 M2 P75가 M0 P75보다 낮다. 세 분위 정책의 포함률이 모두 0.75보다 높아(분위 보정이 안 됨) "
-      "비용 차이에는 예측 정확도와 분위의 넓이 차이가 섞인다. M0 P75는 계절 비율 이력에 코로나 시기(2020~2021)가 들어 있어 넓게 잡혔을 수 있다(확인하지 않은 가설). "
-      "그래서 이 표로 'lag 5에서 M2가 재고에 쓸모 있다'고 읽지 않는다. lag 0에서 M3 P75 비용이 M2 P75보다 조금 낮은 것(MASE와 반대)도 같은 이유로 해석하지 않는다. "
-      "포함률을 0.75에 맞춘 뒤(conformal 등) 비교해야 하며, 하지 않았다.\n")
+    w("| lag | 비용 비율 (τ) | 정책 | 칸 | 포함률 | 결품률(부족분 ÷ 수요) | 결품 칸 비율 | 평균 재고일수 | 상대 비용 (같은 비용 비율의 기준 M0×1.1 = 1) |\n|---|---|---|---|---|---|---|---|---|")
+    order = {"기준 M0×1.1": 0, "M0 분위": 1, "M2 분위": 2, "M3 분위": 3}
+    sm = sim.assign(o1=sim["lag"].map({MAIN: 0, 0: 1}), o2=sim["policy"].map(order)).sort_values(["o1", "cost_ratio", "o2"])
+    for x in sm.itertuples():
+        w(f"| {x.lag} | {int(x.cost_ratio)} ({x.tau:.2f}) | {x.policy} | {x.n} | {pct(x.coverage)} | {pct(x.shortage_rate)} | {pct(x.stockout_cells)} | {x.avg_inventory_days:.1f} | {x.cost_rel:.3f} |")
+    w(f"\n{src('t3_order_sim.csv')}. 포함률이 τ보다 높으면 분위 예측이 넓게(재고를 많이) 잡힌 것이다. 비용 비율이 가정값이라 정책 순위는 이 가정 아래의 것이다.\n")
+    w("**점 예측과 순서가 다를 때**: 분위 정책의 포함률이 τ에서 벗어나면(분위 보정이 안 됨) 비용 차이에 예측 정확도와 분위의 넓이 차이가 섞인다. "
+      "그래서 이 표로 '어느 모델이 재고에 쓸모 있다'고 읽지 않는다. 포함률을 τ에 맞춘 뒤(conformal 등) 비교해야 하며, 하지 않았다.\n")
 
-    w("## 부록 A. lag 0·3 (참고: 0은 이상적 가정, 3은 사용자 지시의 임시 가정)\n")
+    w("## 부록 A. lag 0 (참고: 이상적 가정, 사용통계가 그 달까지 공개됐다고 둠)\n")
     w("| 모델 | " + " | ".join(f"MASE lag {l}" for l in APPX) + " | " + " | ".join(f"WAPE lag {l}" for l in APPX) + " |")
     w("|---" * (1 + 2 * len(APPX)) + "|")
     for m in MODELS:
@@ -240,32 +274,46 @@ def main() -> None:
         w(f"| {g} | {l} | {int(nn[(g, l)])} | " + " | ".join(f"{x[m]:.3f}" for m in MODELS) + " |")
     w(f"\n{src('t3_errors.csv')}. M0은 lag와 무관하다(12개월 전 값은 lag 11까지 늘 관측).\n")
 
-    w("## 문서와 달랐던 점\n")
-    w("- 예측 대상은 M+1 하나다(지시 2). PLAN_P2 §7 최소판(2026-11-16)의 예측 기간 6개(M−4 ~ M+1)는 하지 않았다.")
-    w("- `params.yaml`의 `origin_end: 2025-09`, `horizons: [1, 2, 3]`은 재정의 전 값이라 쓰지 않았다 (origin 2023-01 ~ 2025-11).")
-    w("- 가상 재고는 전국 단위·달마다 독립(이월 없음)이다. PLAN_P2 §6은 시도 × 성분, '발주 = 목표 − 현재 재고'다.")
-    w("- M1(ETS), P90 포함률, 계층 정합, 시도 단위, 의원급 보조 분석은 최소판 범위 밖이라 하지 않았다.\n")
+    w(f"## 부록 B. 예측 대상 여섯 달 M−4 ~ M+1 (lag {MAIN})\n")
+    w("마지막 관측월 a = M − 5에서 h개월 앞. M3의 신호 특징은 기준 스냅샷 M + d − 1(≤ M)로 만들었다(d < 1에서는 origin에 볼 수 있던 것보다 이른 스냅샷, 보수적).\n")
+    hp = hor.pivot_table(index=["d", "target", "h"], columns="model", values="mase").reset_index().sort_values("d")
+    w("| 대상 | h | M0 MASE | M2 MASE | M3 MASE |\n|---|---|---|---|---|")
+    for x in hp.itertuples():
+        w(f"| {x.target} | {x.h} | {x.M0:.3f} | {x.M2:.3f} | {x.M3:.3f} |")
+    w(f"\n{src('t3_horizons.csv')}. M+1 행은 본문 §2와 같은 설정이다.\n")
 
-    w("## 확인 필요\n")
-    w("1. **지시 1~6의 원문**: 이 대화 맥락에 남아 있지 않아 괄호 제목으로 읽었다(WORKLOG §0). 다르게 의도했으면 알려 달라.")
-    w("2. **대상 선정의 생존 편향**: '96개월 관측' 대신 '평가 구간에서 관측 + observed 플래그'로 넓힐지 (PLAN_P2 §2 변경이라 사용자 결정).")
-    w("3. **기반 모델**: 계절 목표(E5)처럼 M2 정의를 바꿀지. 결과를 보고 고르는 일이라, 바꾸면 새 시간 holdout이 필요하다.")
-    w("4. **가상 재고 가정**: 비용 비율 3, 안전계수 0.1, 이월 없음.")
+    w("## 부록 C. 같은 학습 기간(2022년 이후)의 M2 대 M3\n")
+    w("2022-01 이전에는 신호 칸이 비어 있다(채우지 않음). M2와 M3를 모두 **대상 달 2022-02 이후** 학습 행으로만 학습해 비교했다 "
+      "(첫 특징 origin 2022-01의 대상 달이 2022-02라 2022-01 대상 행은 신호 칸이 비어 있다). 전체 기간 M2는 기준선으로 함께 둔다.\n")
+    w("| lag | 전체 기간 M2 (기준선) | 2022~ M2 | 2022~ M3 | M3 − M2 (2022~) | M3가 나은 성분 | Holm 뒤 판정 |\n|---|---|---|---|---|---|---|")
+    for l in sorted(set(exc["lag"]), key=lambda k: {MAIN: 0, 0: 1}.get(k, 2)):
+        x = e.loc[(l, "E4_M3_2022", "E4_M2_2022")]
+        w(f"| {l} | {exm.loc[l, 'M2']:.3f} | {x.mase_b:.3f} | {x.mase_a:.3f} | {100 * x.rel_diff:+.1f}% | {int(x.a_better_series)}/{int(x.n_series)} | {x.verdict_holm.replace('E4_M3_2022', 'M3').replace('E4_M2_2022', 'M2')} |")
+    w(f"\n{src('exp_compare.csv', 'exp_mase_by_model.csv')}. 해석은 결론 문장의 범위 안에서만 한다.\n")
+
+    w("## 문서와 달랐던 점\n")
+    w("- 주 결과는 M+1이고 PLAN_P2 §7 최소판(2026-11-16)의 예측 기간 6개(M−4 ~ M+1)는 부록 B에 둔다 (사용자 결정 2026-11-18).")
+    w("- `params.yaml`의 `origin_end: 2025-09`, `horizons: [1, 2, 3]`은 재정의 전 값이라 쓰지 않았다 (origin 2023-01 ~ 2025-11).")
+    w("- 가상 재고는 전국 단위·달마다 독립(이월 없음)이다. PLAN_P2 §6은 시도 × 성분, '발주 = 목표 − 현재 재고'다 (가정 유지, 사용자 결정 2026-11-18).")
+    w("- M1(ETS), P90 포함률, 계층 정합, 시도 단위, 의원급 보조 분석은 최소판 범위 밖이라 하지 않았다.\n")
+    w("## 정한 것과 남은 것 (사용자 결정 2026-11-18, DECISIONS)\n")
+    w("- 생존 편향은 한계로 적고 고치지 않는다. M2 정의는 바꾸지 않는다. 재고 가정은 유지한다. 막힌 신호·미결 처리 방식은 승인됐다.")
+    w("- 남은 진단(향후 과제): 시드 분포, origin 블록 부트스트랩, 분위 포함률 보정, 특징 인코딩 비교, 대상 확대, 따로 튜닝.")
     (ROOT / "reports/P2_min_result.md").write_text("\n".join(L) + "\n", encoding="utf-8")
     lim = ROOT / "docs/LIMITATIONS.md"
     t = lim.read_text(encoding="utf-8")
     st, en = "<!-- P2 최소판 한계 시작 (scripts/p2_min_report.py 생성) -->", "<!-- P2 최소판 한계 끝 -->"
     blk = "\n".join([st, "", "## P2 최소판 한계 (먼저 읽을 것)", "",
-        "숫자는 `scripts/p2_min_report.py`가 `outputs/p2/` CSV(t1_coverage, t3_compare, exp_compare, exp_inject, exp_e1_constant)에서 계산했다. 자세한 것은 [P2 결과](../reports/P2_min_result.md).", "", "| # | 무엇이 | 영향 크기 | 대응 |", "|---|---|---|---|",
-        f"| W1 | 대상 선정의 생존 편향: 96개월 내내 관측된 성분만 | 주력 묶음 106개 중 {len(tgt)}개, 2022 원외 청구금액의 {pct(cov['amt_share'])} | 선정 규칙 변경은 사용자 결정 (P2 결과 확인 필요 2) |",
+        "숫자는 `scripts/p2_min_report.py`가 `outputs/p2/` CSV(t1_coverage, t3_compare, exp_compare, exp_inject, exp_e1_constant, diag_compare)에서 계산했다. 자세한 것은 [P2 결과](../reports/P2_min_result.md).", "", "| # | 무엇이 | 영향 크기 | 대응 |", "|---|---|---|---|",
+        f"| W1 | 대상 선정의 생존 편향: 96개월 내내 관측된 성분만 | 주력 묶음 106개 중 {len(tgt)}개, 2022 원외 청구금액의 {pct(cov['amt_share'])} | 한계로 적고 고치지 않는다 (사용자 결정 2026-11-18) |",
         f"| W2 | 주 결과(lag 5)에서 전역 모델이 12개월 전 값에 진다 | MASE M2 {m20.mase_a:.3f} 대 M0 {m20.mase_b:.3f} | 숨기지 않고 결론 첫 줄에 쓴다 |",
         f"| W3 | 신호 특징의 결측이 시기 표시로 작동 (상수 열 실험 E1′로 확인) | lag 5 M3 − M2 {relp(MAIN, 'M3', 'M2'):+.1f}% 중 {relp(MAIN, 'E1_null', 'M2'):+.1f}%가 시기 표시 | 결측을 채우지 않는다(CLAUDE.md). 신호 내용의 몫은 M3 − E1로 따로 보고 |",
         "| W4 | 수정본 사용통계로 학습·평가 | 측정 불가 (판이 하나) | L17, BACKLOG X11 |",
-        "| W5 | 가상 재고는 전국·이월 없음·비용 비율 3·안전계수 0.1(가정값) | 약국 재고가 아니다 | P2 결과 §가정 |",
+        "| W5 | 가상 재고는 전국·이월 없음·비용 비율 1·3·9·안전계수 0.1(가정값) | 약국 재고가 아니다. 분위 포함률이 τ에 맞지 않아 정책 비교가 섞인다 | 가정 유지 (사용자 결정). 포함률 보정은 향후 과제 |",
         "| W6 | 성분 간 독립을 가정한 검정 | 같은 origin을 공유해 p값이 낙관적일 수 있다 | 다루지 않음 (origin 블록 부트스트랩 미실행). Holm은 다중 비교만 다룬다 |",
-        "| W7 | 주력 묶음을 평가 기간(2022~2025) 계절성으로, 규모 조건을 2022 전체로 골랐다 | 계절 모델(M0)에 유리하게 쏠릴 수 있다. lag 5 첫 origin은 2022-08까지만 본다 | 선정 변경은 사용자 결정 |",
+        "| W7 | 주력 묶음을 평가 기간(2022~2025) 계절성으로, 규모 조건을 2022 전체로 골랐다 | 계절 모델(M0)에 유리하게 쏠릴 수 있다. lag 5 첫 origin은 2022-08까지만 본다 | 한계로 적고 고치지 않는다 |",
         "| W8 | P1 규칙(v5.3)은 전체 기간 결과를 보고 고쳤고, 미리 잠가 둔 시간 holdout이 없다 | as-of 시험은 규칙 선택의 미래 지식을 잡지 못한다 | 새 시간 holdout은 사용자 일 |",
-        "| W9 | 검정력이 낮다 | 일부러 넣은 20% 효과도 lag 3·5에서 일부만, lag 0에서는 못 잡았다 (E6) | '신호에 정보가 없다'고 쓰지 않는다 |",
+        "| W9 | 신호 효과를 검출할 힘이 부족하다 | 일부러 넣은 20% 효과도 일부만 검출 (E6) | 결론은 '개선하지 못했고 검출할 힘이 부족했다'까지만 쓴다 |",
         "", en])
     if st in t:
         t = t[: t.index(st)] + blk + t[t.index(en) + len(en):]

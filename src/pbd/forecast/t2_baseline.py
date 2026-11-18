@@ -1,4 +1,4 @@
-"""P2 T2 기준선 (최소판): M0 롤링 origin 오차표. lag = 0, 3 (사용자 지시 2026-11-18), 5 (PLAN_P2 §3 기본, DECISIONS 2026-11-16).
+"""P2 T2 기준선 (최소판): M0 롤링 origin 오차표. lag = 5(주), 0(참고). 3은 제외 (사용자 결정 2026-11-18).
 origin M = 2023-01 ~ 2025-11 (예측 대상 M+1 ≤ 2025-12).
 사용: python -m pbd.forecast.t2_baseline  (make p2-t2)
 """
@@ -10,7 +10,7 @@ from pbd.common import DB_PATH, ROOT, connect
 from pbd.forecast import rolling as R
 
 OUT = ROOT / "outputs/p2"
-LAGS = (0, 3, 5)
+LAGS = (5, 0)   # 5 = 주 결과, 0 = 참고(이상적). 3은 제외 (사용자 결정 2026-11-18)
 ORIGINS = R.months(R.P["origin_start"], R.madd(R.P["end_month"], -1))
 
 
