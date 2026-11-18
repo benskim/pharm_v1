@@ -3,7 +3,7 @@
 심평원 급여목록의 비고에 적힌 예고(가격 인하·등재·급여정지)를 유효일 기준 원장으로 정리한다. 그 예고가 실현된 비율과 영향 규모를, 사용통계가 공개되기 전(5개월 뒤)에 매달 1일 리포트로 낸다. 
 
 <!-- P1 요약 시작 (scripts/p1_docs.py 생성) -->
-**P1 (v5.3)**: 약가 예고 최종 실현율 B 99.7%·현재 시점 집행률 A 99.7%, 급여중지 예고 B 89.3%·A 53.7% (집행정지율 47.3%), 약가 변화의 66.7%는 예고 없음. holdout 정밀도 처음 라벨 83.3%, 라벨 판정 후 90.0%. 시험 318개. 2쪽 요약: [reports/SUMMARY.md](reports/SUMMARY.md), 한계: [docs/LIMITATIONS.md](docs/LIMITATIONS.md) V1~V7, 규칙: [docs/RULES_2026-11-17.md](docs/RULES_2026-11-17.md).
+**P1 (v5.3)**: 약가 예고 최종 실현율 B 99.7%·현재 시점 집행률 A 99.7%, 급여중지 예고 B 89.3%·A 53.7% (집행정지율 47.3%), 약가 변화의 66.7%는 예고 없음. holdout 정밀도 처음 라벨 83.3%, 라벨 판정 후 90.0%. 시험 362개. 2쪽 요약: [reports/SUMMARY.md](reports/SUMMARY.md), 한계: [docs/LIMITATIONS.md](docs/LIMITATIONS.md) V1~V7, 규칙: [docs/RULES_2026-11-17.md](docs/RULES_2026-11-17.md).
 <!-- P1 요약 끝 -->
 
 | | P1 선행 신호 원장 (완료) | P2 수요 예측 (설계만) |

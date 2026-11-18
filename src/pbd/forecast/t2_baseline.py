@@ -14,9 +14,15 @@ LAGS = (0, 3, 5)
 ORIGINS = R.months(R.P["origin_start"], R.madd(R.P["end_month"], -1))
 
 
-def load(con=None):
+TARGETS = ("claim_qty", "claim_amt")
+
+
+def load(con=None, target: str = "claim_qty"):
+    """대상 성분의 패널. 목표 변수는 claim_qty(주) 또는 claim_amt(청구금액, 긍정 대조). 모델 코드가 같은 칸 이름을
+    쓰도록 목표 값을 claim_qty 칸에 넣는다"""
+    assert target in TARGETS
     con = con or connect(DB_PATH, read_only=True)
-    panel = con.execute("""select p.c4, p.month, p.claim_qty, p.usable from fc_panel p join fc_target t using (c4)
+    panel = con.execute(f"""select p.c4, p.month, p.{target} claim_qty, p.usable from fc_panel p join fc_target t using (c4)
                            order by 1, 2""").df()
     tgt = con.execute("select c4, cls from fc_target order by c4").df()
     return panel, list(tgt["c4"]), dict(zip(tgt["c4"], tgt["cls"]))

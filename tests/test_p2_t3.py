@@ -81,11 +81,13 @@ def asof():
 def _eq(a: pd.DataFrame, b: pd.DataFrame) -> bool:
     a = a.sort_values("c4").reset_index(drop=True)
     b = b.sort_values("c4").reset_index(drop=True)
-    return a.shape == b.shape and (a["c4"] == b["c4"]).all() and np.allclose(a[list(S.FEATURES)], b[list(S.FEATURES)])
+    # 허용오차 없이 같은 값 (검토 c11)
+    return a.shape == b.shape and (a["c4"] == b["c4"]).all() and np.array_equal(a[list(S.FEATURES)].to_numpy(),
+                                                                                 b[list(S.FEATURES)].to_numpy())
 
 
 @pytest.mark.parametrize("s", ASOF)
-@pytest.mark.parametrize("lag", [0, 3])
+@pytest.mark.parametrize("lag", [0, 3, 5])
 def test_features_equal_after_deleting_later_snapshots(full, asof, s, lag):
     """origin M = s (주 정의). M+1 이후 스냅샷을 지우고 다시 만든 v5 원장의 특징 = 전체 원장의 특징"""
     from pbd.forecast.rolling import madd
@@ -116,3 +118,22 @@ def test_leak_injection_outcome_is_detected(full, asof):
     diffs = [lag for lag in (3, 5) if not _eq(S.features(leaky, s, madd(s, -lag), madd(s, 1)),
                                               S.features(asof[s], s, madd(s, -lag), madd(s, 1)))]
     assert diffs, "사후 결과로 거른 특징이 as-of 특징과 같다: 이 달에서는 주입을 잡지 못함"
+
+
+@pytest.mark.parametrize("s", ["2025-07", "2025-10"])
+@pytest.mark.parametrize("lag", [0, 5])
+def test_m3_end_to_end_equal_after_deleting_later_snapshots(full, asof, s, lag):
+    """검토 c2·c3: origin s의 M3 학습 행 전체(2022-01 ~ s의 모든 pseudo-origin) 특징과 M3 예측이,
+    s 이후 스냅샷을 지우고 다시 만든 원장에서도 같다 (허용오차 0)"""
+    from pbd.forecast import rolling as R
+    from pbd.forecast.t2_baseline import load
+    origins = R.months(S.FIRST_SNAPSHOT, s)
+    panel, series, cls = load()
+    fa = S.feature_table(full, lag, "same", origins, series)
+    fb = S.feature_table(asof[s], lag, "same", origins, series)
+    key = ["c4", "origin"]
+    fa, fb = fa.sort_values(key).reset_index(drop=True), fb.sort_values(key).reset_index(drop=True)
+    assert fa[key].equals(fb[key]) and np.array_equal(fa[list(S.FEATURES)].to_numpy(), fb[list(S.FEATURES)].to_numpy())
+    pa = R.gbm(R.available(panel, s, lag), s, lag, series, cls=cls, feat=fa)
+    pb = R.gbm(R.available(panel, s, lag), s, lag, series, cls=cls, feat=fb)
+    assert pa.equals(pb)

@@ -68,9 +68,21 @@ def m0(hist: pd.DataFrame, origin: str, lag: int, series: list[str], **_) -> pd.
     return pd.DataFrame(dict(c4=series, target=t, yhat=[v.get(c, np.nan) for c in series]))
 
 
+def m0_quantile(hist: pd.DataFrame, origin: str, lag: int, series: list[str], q: float = 0.75, **_) -> pd.DataFrame:
+    """M0의 분위 판: ŷ = y_{t−12} × (과거 y_u / y_{u−12} 비율의 q 분위). 비율은 u ≤ M − lag인 성분 자신의 값 (검토 a10 기준 정책)"""
+    t = madd(origin, 1)
+    last = madd(origin, -lag)
+    y = to_matrix(hist, series, P["start_month"], last)
+    r = y[:, 12:] / y[:, :-12]
+    qq = np.nanquantile(np.where(np.isfinite(r) & (r > 0), r, np.nan), q, axis=1)
+    base = m0(hist, origin, lag, series)
+    return base.assign(yhat=base["yhat"].to_numpy() * qq)
+
+
 def design(y: np.ndarray, lo: str, series: list[str], cls: dict, h: int, t_lo: int, t_hi: int,
-           feat: pd.DataFrame | None = None) -> pd.DataFrame:
-    """대상 달 t(행렬 열 번호 t_lo..t_hi)마다 한 행. a = t − h 이하 값만 쓴다. feat: (c4, origin) 신호 특징"""
+           feat: pd.DataFrame | None = None, target_mode: str = "last") -> pd.DataFrame:
+    """대상 달 t(행렬 열 번호 t_lo..t_hi)마다 한 행. a = t − h 이하 값만 쓴다. feat: (c4, origin) 신호 특징.
+    target_mode = 'last': 목표 log(y_t / y_a) (주), 'seasonal': 목표 log(y_t / y_{t−12}) (실험, 검토 b8)"""
     base = midx(lo)
     rows = []
     for i, c in enumerate(series):
@@ -92,8 +104,14 @@ def design(y: np.ndarray, lo: str, series: list[str], cls: dict, h: int, t_lo: i
                 v = y[i, j] if 0 <= j <= a else np.nan
                 r[f"s{s}"] = np.log(v / ya) if np.isfinite(v) and v > 0 else np.nan
             yt = y[i, t] if t < y.shape[1] else np.nan
-            r["y_target"] = np.log(yt / ya) if np.isfinite(yt) and yt > 0 else np.nan
-            r["ya"] = ya
+            if target_mode == "seasonal":
+                yb = y[i, t - 12] if t - 12 >= 0 else np.nan
+                if not np.isfinite(yb) or yb <= 0:
+                    continue
+            else:
+                yb = ya
+            r["y_target"] = np.log(yt / yb) if np.isfinite(yt) and yt > 0 else np.nan
+            r["ya"] = yb
             rows.append(r)
     d = pd.DataFrame(rows)
     if feat is not None and len(d):
@@ -101,8 +119,21 @@ def design(y: np.ndarray, lo: str, series: list[str], cls: dict, h: int, t_lo: i
     return d
 
 
+def train_frame(y: np.ndarray, lo: str, series: list[str], cls: dict, h: int, last: int, feat, target_mode: str = "last",
+                train_lo: str | None = None) -> pd.DataFrame:
+    """학습 행: 목표가 관측된 대상 달 t ≤ last(= M − lag). 목표 달이 공백 구간(M − lag, M]에 들어가면 라벨 누수다"""
+    tr = design(y, lo, series, cls, h, 0, y.shape[1] - 1, feat, target_mode)
+    tr = tr[tr["y_target"].notna()]
+    if train_lo is not None:
+        tr = tr[tr["target"] >= train_lo]
+    assert len(tr) == 0 or tr["target"].max() <= mstr(last), "학습 목표가 마지막 관측월 뒤 (라벨 누수)"
+    return tr
+
+
 def gbm(hist: pd.DataFrame, origin: str, lag: int, series: list[str], cls: dict, feat: pd.DataFrame | None = None,
-        lo: str = P["start_month"], quantile: float | None = None, **_) -> pd.DataFrame:
+        lo: str = P["start_month"], quantile: float | None = None, target_mode: str = "last", train_lo: str | None = None,
+        params: dict | None = None, **_) -> pd.DataFrame:
+    """train_lo: 학습 행의 대상 달 하한 (실험, 검토 b5). params: LGB_PARAMS 덮어쓰기 (실험)"""
     """M2 (feat 없음) / M3 (feat = 신호 특징). 학습: 대상 달 t ≤ M − lag (관측된 목표만). 예측: t = M+1"""
     import lightgbm as lgb
 
@@ -111,12 +142,11 @@ def gbm(hist: pd.DataFrame, origin: str, lag: int, series: list[str], cls: dict,
     assert hist["month"].max() <= mstr(last), "available()을 거치지 않은 입력"
     y = to_matrix(hist, series, lo, mstr(last))
     base = midx(lo)
-    tr = design(y, lo, series, cls, h, 0, last - base, feat)
-    tr = tr[tr["y_target"].notna()]
+    tr = train_frame(y, lo, series, cls, h, last, feat, target_mode, train_lo)
     te = design(np.concatenate([y, np.full((len(series), h), np.nan)], axis=1), lo, series, cls, h,
-                last - base + h, last - base + h, feat)
+                last - base + h, last - base + h, feat, target_mode)
     cols = [c for c in tr.columns if c not in ("c4", "target", "origin", "y_target", "ya")]
-    params = dict(LGB_PARAMS)
+    params = {**LGB_PARAMS, **(params or {})}
     if quantile is not None:
         params.update(objective="quantile", alpha=quantile)
     mdl = lgb.LGBMRegressor(**params)

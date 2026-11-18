@@ -6,7 +6,8 @@
 - 가상 재고 시뮬레이션 (전국 성분 단위, 약국 재고가 아니다): 매달 목표 재고 S를 두고 실제 수요 D(사용통계 실측)를 맞는다.
   달마다 독립(이월 없음), 리드타임 1개월 = origin M에 정한 S가 M+1에 쓰인다. 결품 비용 / 재고 비용 = 3 (가정값,
   params order_sim.cost_ratios의 가운데 값) → 분위 τ = 3 / (1 + 3) = 0.75. 기준 정책 S = M0 × (1 + 0.1) (안전계수 0.1은 가정값).
-  예측 정책 S = M2 / M3의 0.75 분위 예측(LightGBM quantile).
+  예측 정책 S = M2 / M3의 0.75 분위 예측(LightGBM quantile). 분위에 맞춘 기준 M0 P75 = y_{t−12} × 과거 계절 비율의 0.75 분위
+  (검토 a10). 포함률(실수요 ≤ S인 칸 비율)을 함께 낸다 (0.75 근처면 분위가 맞다).
 사용: python -m pbd.forecast.t3_models  (make p2-t3)
 """
 from __future__ import annotations
@@ -40,8 +41,25 @@ def compare(sc: pd.DataFrame, a: str, b: str, lag: int) -> dict:
     wil_p = stats.wilcoxon(per).pvalue if n else np.nan
     verdict = "차이 없음" if not (sign_p < ALPHA and wil_p < ALPHA) else (f"{a}가 나음" if per.median() < 0 else f"{b}가 나음")
     return dict(lag=lag, a=a, b=b, n_series=len(per), n_cells=len(x), mase_a=x[a].mean(), mase_b=x[b].mean(),
-                mean_diff=per.mean(), median_diff=per.median(), a_better_series=k, sign_p=sign_p, wilcoxon_p=wil_p,
-                verdict=verdict)
+                mean_diff=per.mean(), median_diff=per.median(), rel_diff=x[a].mean() / x[b].mean() - 1, a_better_series=k,
+                sign_p=sign_p, wilcoxon_p=wil_p, verdict=verdict)
+
+
+def holm(p: pd.Series) -> pd.Series:
+    """Holm 보정 p (검토 a12). 한 표 안의 비교 전체를 한 묶음으로"""
+    o = p.sort_values()
+    m = len(o)
+    adj = (o * np.arange(m, 0, -1)).cummax().clip(upper=1)
+    return adj.reindex(p.index)
+
+
+def add_holm(c: pd.DataFrame) -> pd.DataFrame:
+    c = c.copy()
+    c["sign_p_holm"] = holm(c["sign_p"])
+    c["wilcoxon_p_holm"] = holm(c["wilcoxon_p"])
+    ok = (c["sign_p_holm"] < ALPHA) & (c["wilcoxon_p_holm"] < ALPHA)
+    c["verdict_holm"] = np.where(~ok, "차이 없음", np.where(c["median_diff"] < 0, c["a"] + "가 나음", c["b"] + "가 나음"))
+    return c
 
 
 def order_sim(stock: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
@@ -54,7 +72,7 @@ def order_sim(stock: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     d["cost"] = d["left"] + COST_RATIO * d["short"]
     rows = []
     for (lag, pol), g in d.groupby(["lag", "policy"]):
-        rows.append(dict(lag=lag, policy=pol, n=len(g), shortage_rate=g["short"].sum() / g["d"].sum(),
+        rows.append(dict(lag=lag, policy=pol, n=len(g), coverage=(g["d"] <= g["s"]).mean(), shortage_rate=g["short"].sum() / g["d"].sum(),
                          stockout_cells=(g["short"] > 0).mean(), avg_inventory_days=g["inv_days"].mean(),
                          cost_rel=g["cost"].sum()))
     r = pd.DataFrame(rows)
@@ -63,8 +81,10 @@ def order_sim(stock: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     return r
 
 
-def main() -> None:
-    panel, series, cls = load()
+def main(target: str = "claim_qty") -> None:
+    """target = claim_qty (주) / claim_amt (긍정 대조: 약가 예고는 수량보다 금액에 먼저 나타나야 한다). 출력 이름에 목표를 붙인다"""
+    sfx = "" if target == "claim_qty" else f"_{target}"
+    panel, series, cls = load(target=target)
     scale = R.scale12(panel, series)
     tb = S.load_tables(connect(DB_PATH, read_only=True))
     feat_origins = R.months(S.FIRST_SNAPSHOT, ORIGINS[-1])
@@ -79,6 +99,8 @@ def main() -> None:
             print(f"lag {lag} {name} 끝", flush=True)
         m0 = preds[-4]
         stocks.append(m0.assign(s=m0["yhat"] * (1 + SAFETY), policy="기준 M0×1.1")[["c4", "target", "origin", "lag", "s", "policy"]])
+        q0 = R.rolling(panel, R.m0_quantile, ORIGINS, lag, series, q=TAU)
+        stocks.append(q0.assign(s=q0["yhat"], policy=f"M0 P{int(TAU * 100)}")[["c4", "target", "origin", "lag", "s", "policy"]])
         for name, kw in (("M2", {}), ("M3", dict(feat=f_same))):
             q = R.rolling(panel, R.gbm, ORIGINS, lag, series, cls=cls, quantile=TAU, **kw)
             stocks.append(q.assign(s=q["yhat"], policy=f"{name} P{int(TAU * 100)}")[["c4", "target", "origin", "lag", "s", "policy"]])
@@ -90,16 +112,16 @@ def main() -> None:
     fe["has_signal"] = (fe["cut_frac"] > 0) | (fe["susp_frac"] > 0) | (fe["listing_n"] > 0)
     sc = sc.merge(fe[["c4", "origin", "lag", "has_signal"]], on=["c4", "origin", "lag"], how="left")
     OUT.mkdir(parents=True, exist_ok=True)
-    sc.to_csv(OUT / "t3_pred.csv", index=False)
-    fe.to_csv(OUT / "t3_features.csv", index=False)
+    sc.to_csv(OUT / f"t3_pred{sfx}.csv", index=False)
+    fe.to_csv(OUT / f"t3_features{sfx}.csv", index=False)
     err = pd.concat([table(sc, ["model", "lag"]).assign(part="전체"),
                      table(sc, ["model", "lag", "flu"]).assign(part="유행기(11~3월) 여부"),
                      table(sc, ["model", "lag", "has_signal"]).assign(part="origin에 창 안 신호 여부")], ignore_index=True)
-    err.to_csv(OUT / "t3_errors.csv", index=False)
-    cmp_ = pd.DataFrame([compare(sc, a, b, lag) for lag in LAGS for a, b in (("M3", "M2"), ("M3p", "M2"), ("M2", "M0"))])
-    cmp_.to_csv(OUT / "t3_compare.csv", index=False)
+    err.to_csv(OUT / f"t3_errors{sfx}.csv", index=False)
+    cmp_ = add_holm(pd.DataFrame([compare(sc, a, b, lag) for lag in LAGS for a, b in (("M3", "M2"), ("M3p", "M2"), ("M2", "M0"))]))
+    cmp_.to_csv(OUT / f"t3_compare{sfx}.csv", index=False)
     sim = order_sim(pd.concat(stocks, ignore_index=True), panel)
-    sim.to_csv(OUT / "t3_order_sim.csv", index=False)
+    sim.to_csv(OUT / f"t3_order_sim{sfx}.csv", index=False)
     with pd.option_context("display.width", 250):
         print(err[err["part"] == "전체"].round(4).to_string(index=False))
         print(cmp_.round(4).to_string(index=False))
@@ -107,4 +129,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(sys.argv[1] if len(sys.argv) > 1 else "claim_qty")

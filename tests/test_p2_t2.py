@@ -53,7 +53,7 @@ def test_m0_no_leak(panel, origin, lag):
     assert np.allclose(a.set_index("c4")["yhat"], exp.reindex(SERIES))
 
 
-@pytest.mark.parametrize("lag", [0, 3])
+@pytest.mark.parametrize("lag", [0, 3, 5])
 def test_m2_no_leak(panel, lag):
     ok, a = _invariant(R.gbm, panel, "2024-06", lag)
     assert ok and a["yhat"].notna().all()
@@ -100,3 +100,22 @@ def test_scale_uses_only_2022_and_before(panel):
     p = panel.copy()
     p.loc[p["month"] > "2022-12", "claim_qty"] *= 5
     assert s.equals(R.scale12(p, SERIES))
+
+
+def test_train_targets_not_after_last_observed(panel):
+    """학습 행의 목표 달 ≤ M − lag (검토 c12)"""
+    o, lag = "2024-06", 5
+    hist = R.available(panel, o, lag)
+    last = R.midx(o) - lag
+    y = R.to_matrix(hist, SERIES, "2018-01", R.mstr(last))
+    tr = R.train_frame(y, "2018-01", SERIES, CLS, lag + 1, last, None)
+    assert tr["target"].max() == R.mstr(last)
+
+
+def test_label_leak_injection_is_detected(panel):
+    """누수 주입 3: 공백 구간(M − lag, M]의 실측을 학습 목표로 쓰게 하면(행렬을 M까지) train_frame이 거부한다"""
+    o, lag = "2024-06", 5
+    last = R.midx(o) - lag
+    y = R.to_matrix(panel[panel["month"] <= o], SERIES, "2018-01", o)    # 누수: M까지
+    with pytest.raises(AssertionError):
+        R.train_frame(y, "2018-01", SERIES, CLS, lag + 1, last, None)
