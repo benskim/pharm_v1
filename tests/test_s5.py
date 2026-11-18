@@ -39,19 +39,19 @@ def syn():
     B002: p4 50→50 → 3_no_list_change
     C003: p5 100→80, 2024-02 원외 미관측 → 2_usage_unobserved (1월은 관측 → 일부 미관측)
     D004: p6 100→90, PRICE_CHANGE 유효일 2024-02-15 → 4_mid_month_change
-    E005: p7 unpriced 두 달 → 1_no_basket
+    E005: p7 산정불가(금액 없음) 두 달 → 1_no_basket (v5: 산정불가는 상태가 아니라 약가 유형)
     원내(IN) 행은 단가에 넣지 않는다 (A001 IN 1000원/1개)"""
     con = duckdb.connect()
-    con.execute("create table s3_cal as select * from (values ('2024-01', null, 1), ('2024-02', '2024-01', 2)) t(list_month, prev_month, mi)")
+    con.execute("create table cal_v5 as select * from (values ('2024-01', null, 1), ('2024-02', '2024-01', 2)) t(list_month, prev_month, mi)")
     rows = [("p1", "A001", 100, 90), ("p2", "A001", 200, 200), ("p4", "B002", 50, 50), ("p5", "C003", 100, 80), ("p6", "D004", 100, 90)]
     psm = []
     for pc, c4, a, b in rows:
         psm += [(pc, "2024-01", c4, "reimbursed", a), (pc, "2024-02", c4, "reimbursed", b)]
     psm += [("p3", "2024-01", "A001", "reimbursed", 300), ("p3", "2024-02", "A001", "suspended", 300),
-            ("p7", "2024-01", "E005", "unpriced", None), ("p7", "2024-02", "E005", "unpriced", None)]
-    con.execute("create table product_state_month (product_code varchar, list_month varchar, c4 varchar, state_asof varchar, price_listed double)")
-    con.executemany("insert into product_state_month values (?, ?, ?, ?, ?)", psm)
-    con.execute("""create table event_ledger as select * from (values ('D004', date '2024-02-15', 'PRICE_CHANGE', '2024-03'),
+            ("p7", "2024-01", "E005", "reimbursed", None), ("p7", "2024-02", "E005", "reimbursed", None)]
+    con.execute("create table state_month_v5 (product_code varchar, list_month varchar, c4 varchar, state varchar, price_listed double)")
+    con.executemany("insert into state_month_v5 values (?, ?, ?, ?, ?)", psm)
+    con.execute("""create table ev_v5 as select * from (values ('D004', date '2024-02-15', 'PRICE_CHANGE', '2024-03'),
                    ('A001', date '2024-02-01', 'PRICE_CHANGE', '2024-02')) t(market_c4, effective_date, event_type, observed_month)""")
     obs = [(c4, m, not (c4 == "C003" and m == "2024-02")) for c4 in ("A001", "B002", "C003", "D004", "E005") for m in ("2024-01", "2024-02")]
     con.execute("create table usage_c4_month (c4 varchar, month varchar, observed_out boolean)")
@@ -87,8 +87,8 @@ db = pytest.mark.skipif(not DB_PATH.exists(), reason="pbd.duckdb 없음")
 @pytest.fixture(scope="module")
 def con():
     c = duckdb.connect(str(DB_PATH), read_only=True)
-    if not c.execute("select count(*) from information_schema.tables where table_name = 'event_ledger'").fetchone()[0]:
-        pytest.skip("event_ledger 없음")
+    if not c.execute("select count(*) from information_schema.tables where table_name = 'event_ledger_v5'").fetchone()[0]:
+        pytest.skip("event_ledger_v5 없음 (make p1-v5)")
     S._usage(c)
     yield c
     c.close()
@@ -97,8 +97,12 @@ def con():
 @db
 def test_f8_cluster_distribution_sample(con):
     """reference F8: 표본 구간(2024-02~2025-12)의 실질 신규 품목을 낸 업체 수 분포. reference 정의의 진입 재분류 표(s3_entry_exit_sample)로 센다"""
-    got = dict(con.execute("""with e as (select x.month, q.c4, q.firm from s3_entry_exit_sample x
-            join product_state_month q on q.product_code = x.product_code and q.list_month = x.month
+    from conftest import LEGACY_DB
+    if not LEGACY_DB.exists():
+        pytest.skip("v4 보관본 없음 (make p1-v4-legacy)")
+    con.execute(f"attach if not exists '{LEGACY_DB.as_posix()}' as v4 (read_only)")
+    got = dict(con.execute("""with e as (select x.month, q.c4, q.firm from v4.s3_entry_exit_sample x
+            join v4.product_state_month q on q.product_code = x.product_code and q.list_month = x.month
             where x.side = 'entry' and x.kind = 'new_item'),
           g as (select c4, month, count(distinct firm) nf from e group by 1, 2)
         select case when nf >= 10 then '10+' when nf >= 5 then '5~9' when nf >= 2 then '2~4' else '1' end, count(*) from g group by 1""").fetchall())
@@ -134,8 +138,8 @@ def test_c_rank_rules(con):
     assert not any(re.search("saving|절감", col) for col in r.columns)       # 절감액은 계산하지 않는다
     # 한 그룹을 직접 센 값과 대조
     top = r.iloc[0]
-    n, mn, mx = con.execute("""select count(*), min(price_listed), max(price_listed) from product_state_month
-        where list_month = '2025-12' and in_substitute_list and state_asof = 'reimbursed' and price_listed > 0
+    n, mn, mx = con.execute("""select count(*), min(price_listed), max(price_listed) from state_month_v5
+        where list_month = '2025-12' and in_substitute_list and state = 'reimbursed' and price_listed > 0
           and sub_group_code = ? and ingredient_code = ?""", [top["grp"], top["ingredient_code"]]).fetchone()
     assert (top["n_products"], top["min_price"], top["max_price"]) == (n, mn, mx)
 
@@ -155,13 +159,13 @@ def test_effective_month_prices_synthetic():
     q2: 100, 80, 80. 2024-02 관측, 유효일 2024-02-01 → 관측월과 같음 (100, 80, 80)
     q3: 50, 50, 40. 2024-03 관측, 유효일 2024-03-11 → 3월 = 50×10/31 + 40×21/31"""
     con = duckdb.connect()
-    con.execute("create table s3_cal as select * from (values ('2024-01', null, 1), ('2024-02', '2024-01', 2), ('2024-03', '2024-02', 3)) t(list_month, prev_month, mi)")
-    con.execute("create table product_state_month (product_code varchar, list_month varchar, c4 varchar, state_asof varchar, price_listed double)")
+    con.execute("create table cal_v5 as select * from (values ('2024-01', null, 1), ('2024-02', '2024-01', 2), ('2024-03', '2024-02', 3)) t(list_month, prev_month, mi)")
+    con.execute("create table state_month_v5 (product_code varchar, list_month varchar, c4 varchar, state varchar, price_listed double)")
     rows = []
     for pc, ps in (("q1", (100, 100, 90)), ("q2", (100, 80, 80)), ("q3", (50, 50, 40))):
         rows += [(pc, m, "X001", "reimbursed", p) for m, p in zip(("2024-01", "2024-02", "2024-03"), ps)]
-    con.executemany("insert into product_state_month values (?, ?, ?, ?, ?)", rows)
-    con.execute("""create table event_ledger as select * from (values
+    con.executemany("insert into state_month_v5 values (?, ?, ?, ?, ?)", rows)
+    con.execute("""create table ev_v5 as select * from (values
         ('q1', '2024-03', date '2024-02-10', 'PRICE_CHANGE'), ('q2', '2024-02', date '2024-02-01', 'PRICE_CHANGE'),
         ('q3', '2024-03', date '2024-03-11', 'PRICE_CHANGE')) t(product_code, observed_month, effective_date, event_type)""")
     p = S.effective_month_prices(con).set_index(["product_code", "list_month"])["p_eff"]

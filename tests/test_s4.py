@@ -139,125 +139,90 @@ db = pytest.mark.skipif(not DB_PATH.exists(), reason="pbd.duckdb 없음")
 @pytest.fixture(scope="module")
 def con():
     c = duckdb.connect(str(DB_PATH), read_only=True)
-    if not c.execute("select count(*) from information_schema.tables where table_name = 'signal_outcome'").fetchone()[0]:
-        pytest.skip("signal_outcome 없음")
+    if not c.execute("select count(*) from information_schema.tables where table_name = 'signal_v5'").fetchone()[0]:
+        pytest.skip("signal_v5 없음 (make p1-v5)")
     yield c
     c.close()
 
 
 @db
-def test_a1_denominator_excludes_censored_unverifiable_moot(con):
+def test_a1_v5_rates_match_rules(con):
+    """RULES §7 (2026-11-18): 급여중지 예고 A = 109/203, B = 109/144, 집행정지율 = 73/203. 삭제 예고는 건수만"""
     import pandas as pd
-    t = pd.read_csv(ROOT / "outputs/s4/a1_by_type.csv")
-    want = dict(con.execute("""select signal_type, count(*) filter (where outcome not in ('censored', 'unverifiable', 'moot'))
-                               from signal_outcome group by 1""").fetchall())
-    assert dict(zip(t["signal_type"], t["denominator"])) == want
-    r = t.set_index("signal_type")
-    # RESUME_SCHEDULED: moot 72는 분모에서 빠진다 (83 − 72 = 11)
-    assert (r.loc["RESUME_SCHEDULED", "moot"], r.loc["RESUME_SCHEDULED", "denominator"]) == (72, 11)
-    # DELISTING_SCHEDULED는 건수로만 (실현율 없음)
-    assert pd.isna(r.loc["DELISTING_SCHEDULED", "rate"])
+    r = pd.read_csv(ROOT / "outputs/s4/a1_by_type.csv").set_index("signal_type")
+    assert (r.loc["SUSPEND_NOTICE", "A_k"], r.loc["SUSPEND_NOTICE", "A_n"]) == (109, 203)
+    assert (r.loc["SUSPEND_NOTICE", "B_k"], r.loc["SUSPEND_NOTICE", "B_n"]) == (109, 144)
+    assert (r.loc["SUSPEND_NOTICE", "stay_k"], r.loc["SUSPEND_NOTICE", "stay_n"]) == (73, 203)
+    assert pd.isna(r.loc["DELISTING_NOTICE", "A_rate"])
+    want = dict(con.execute("select signal_type, count(*) from signal_v5 group by 1").fetchall())
+    assert dict(zip(r.index, r["n"])) == want
 
 
 @db
 def test_sample_60(con):
     import pandas as pd
-    s = pd.read_csv(ROOT / "outputs/validation/sample_60.user_reviewed.csv", dtype=str)   # 저장소에 있는 최종 라벨
+    s = pd.read_csv(ROOT / "outputs/validation/sample_60.user_reviewed.csv", dtype=str)   # 저장소에 있는 최종 라벨 (고정, v5_labels)
     assert len(s) == 61 and s["record_id"].is_unique          # 고정 60 + 추가 1 (sample_id 61, DECISIONS 2026-11-15)
     assert (s["product_code"] == "654700150").any()
-    # 라벨: 비어 있거나(처음 만든 표본) Y / N / 모름, labeler는 claude / user_reviewed, label_source는 raw / external
     assert s["label_type_correct"].fillna("").isin(["", "Y", "N", "모름"]).all()
-    assert s["labeler"].fillna("").isin(["", "claude", "user_reviewed"]).all()
+    assert s["labeler"].fillna("").isin(["", "claude", "user_reviewed", "rule_check"]).all()   # rule_check: 2026-11-18 사용자 지시
     assert s["label_source"].fillna("").isin(["", "raw", "external"]).all()
     assert s[["month", "product_code", "notes_3m", "stratum_size"]].notna().all().all()
-    d = s[s["record_id"].str.startswith("DELISTING:") & s["ledger_claim"].str.contains("interval")]
-    assert len(d) and d["interval_days"].notna().all()
 
 
 @db
-def test_sample_deterministic(tmp_path):
-    from pbd.common import connect
-    from pbd.ledger import s4_analysis as S4
-    c = connect(None)
-    try:
-        c.execute(f"attach '{DB_PATH.as_posix()}' as src (read_only)")
-        c.execute("use src")
-        a = S4.build_sample(c)
-        b = S4.build_sample(c)
-        # 라벨 단 표본은 같은 기록·같은 sample_id로 고정해 다시 채운다 (DECISIONS 2026-11-15)
-        saved = __import__("pandas").read_csv(ROOT / "outputs/validation/sample_60.user_reviewed.csv", dtype=str)
-        f = S4.build_sample(c, frozen=saved[["sample_id", "record_id"]])
-    finally:
-        c.close()
-    assert a.equals(b)
-    assert list(f["record_id"]) == list(saved["record_id"]) and list(f["sample_id"].astype(str)) == list(saved["sample_id"])
-
-
-def test_labeled_sample_not_overwritten(tmp_path, monkeypatch):
-    """라벨이 있는 sample_60.user_reviewed.csv는 덮어쓰지 않고 sample_60.new.csv에 쓴다. 없으면 sample_60.generated.csv"""
+def test_holdout_30(con):
+    """RULES §11-8 · 지시 7: 층 10개 × 3행, sample_60 제품 제외, 시드 고정, 라벨용 파일에 원장 판정값 없음, 정답 칸 비움"""
     import pandas as pd
     from pbd.ledger import s4_analysis as S4
-    (tmp_path / "sample_60.user_reviewed.csv").write_text("sample_id,record_id,ledger_claim,label_type_correct,label_date_correct,label_note\n1,r1,old,Y,,\n", encoding="utf-8")
+    s60 = set(pd.read_csv(ROOT / "outputs/validation/sample_60.user_reviewed.csv", dtype=str)["product_code"])
+    a = S4.holdout_pick(con, exclude_products=s60)
+    b = S4.holdout_pick(con, exclude_products=s60)
+    assert a.equals(b) and len(a) == 30
+    assert a.groupby("stratum").size().to_dict() == {n: 3 for n, _, _ in S4.HOLDOUT_STRATA}
+    assert not (set(a["product_code"]) | set(a["counterpart"].dropna())) & s60
+    assert a["product_code"].is_unique
+    blind = pd.read_csv(ROOT / "outputs/validation/holdout_30.blind.csv", dtype=str)
+    assert len(blind) == 30 and list(blind["product_code"]) == list(a["product_code"])
+    leak = {"stratum", "record_id", "outcome", "kind", "event_type", "signal_type", "ledger_claim", "counterpart", "reason"}
+    assert not leak & set(blind.columns)
+    assert blind[list(S4.TRUTH_COLS)].isna().all().all()
+
+
+def test_holdout_not_overwritten(tmp_path, monkeypatch):
+    """정답을 채운 holdout_30.blind.csv는 덮어쓰지 않고 holdout_30.new.csv에 쓴다"""
+    import pandas as pd
+    from pbd.ledger import s4_analysis as S4
     monkeypatch.setattr(S4, "VAL", tmp_path)
     monkeypatch.setattr(S4, "OUT", tmp_path / "s4")
     monkeypatch.setattr(S4, "build_a1", lambda con: {})
-    for f in ("build_a2", "build_a2_buckets", "build_a2_snapshot_order", "build_a3"):
+    for f in ("build_a2", "build_a2_buckets", "build_a2_snapshot_order", "build_a3", "build_a5"):
         monkeypatch.setattr(S4, f, lambda con: pd.DataFrame({"x": [1]}))
     monkeypatch.setattr(S4, "build_a4_with_sensitivity", lambda con: {})
-    monkeypatch.setattr(S4, "EXTRA_DRAWS", [])
-    monkeypatch.setattr(S4, "build_sample", lambda con, frozen=None: pd.DataFrame(
-        {"sample_id": [1], "record_id": ["r1"], "ledger_claim": ["new"], "label_type_correct": [""]}))
-
-    class C:
-        def execute(self, q):
-            class R:
-                def df(self_inner):
-                    return pd.DataFrame({"y": [1]})
-            return R()
-    S4.write_all(C())
-    labeled = (tmp_path / "sample_60.user_reviewed.csv").read_text(encoding="utf-8")
-    assert labeled == "sample_id,record_id,ledger_claim,label_type_correct,label_date_correct,label_note\n1,r1,old,Y,,\n"
-    new = pd.read_csv(tmp_path / "sample_60.new.csv", dtype=str)
-    assert new.loc[0, "label_type_correct"] == "Y" and new.loc[0, "claim_changed"] == "True"   # 라벨을 옮겨 붙이고 바뀐 주장을 표시
-    # 라벨 파일이 없으면 새 표본은 generated에만 쓰고 최종 라벨 파일을 만들지 않는다
-    (tmp_path / "sample_60.user_reviewed.csv").unlink()
-    S4.write_all(C())
-    assert (tmp_path / "sample_60.generated.csv").exists() and not (tmp_path / "sample_60.user_reviewed.csv").exists()
-
+    monkeypatch.setattr(S4, "build_holdout", lambda con: (pd.DataFrame({"holdout_id": [1], "truth_type": [""], "truth_date": [""], "truth_note": [""]}),
+                                                         pd.DataFrame({"holdout_id": [1]})))
+    (tmp_path / "holdout_30.blind.csv").write_text("holdout_id,truth_type,truth_date,truth_note\n1,SUCCESSION|transfer,2024-01-01,메모\n", encoding="utf-8")
+    S4.write_all(None)
+    assert "SUCCESSION|transfer" in (tmp_path / "holdout_30.blind.csv").read_text(encoding="utf-8")
+    assert (tmp_path / "holdout_30.new.csv").exists()
 
 
 @db
-def test_a4_denominator_reimbursed_only(con):
-    """A4 "절반 이상"의 분모 = 발행 달 state_asof = reimbursed인 같은 성분 제품 (사용자 결정 2026-11-15).
-    기대값은 product_state_month를 이 시험에서 직접 센 값. 민감도 표는 reimbursed + unpriced."""
+def test_a4_denominator_v5(con):
+    """A4 "절반 이상"의 분모 = 최초 기재 달 급여 상태이고 산정불가가 아닌 같은 성분 제품 (사용자 결정 2026-11-15, v5 약가 유형).
+    민감도는 산정불가 포함. 기대값은 state_month_v5를 이 시험에서 직접 센 값"""
     import pandas as pd
     t = pd.read_csv(ROOT / "outputs/s4/a4_targets.csv", dtype={"c4": str})
     d = pd.read_csv(ROOT / "outputs/s4/a4_denominator_diff.csv", dtype={"c4": str})
+    q = """select min(first_month) from signal_v5 where market_c4 = ? and signal_date = ? and realized_month = ?
+           and signal_type = 'PRICE_NOTICE' and source_rule = 'R2' and outcome in ('REALIZED', 'REALIZED_CHANGED')"""
     for r in t.head(5).itertuples():
-        issued = con.execute("""select min(o.issued_month) from signal_outcome o join signal_ledger l using (signal_id)
-            where l.market_c4 = ? and l.signal_date = ? and o.check_month = ? and o.signal_type = 'PRICE_PENDING'
-              and o.outcome in ('realized', 'realized_partial')""", [r.c4, r.signal_date, r.check_month]).fetchone()[0]
-        want = con.execute("""select count(*) from product_state_month where c4 = ? and list_month = ? and state_asof = 'reimbursed'""",
-                           [r.c4, issued]).fetchone()[0]
+        issued = con.execute(q, [r.c4, r.signal_date, r.check_month]).fetchone()[0]
+        want = con.execute("""select count(*) from state_month_v5 where c4 = ? and list_month = ? and state = 'reimbursed'
+                              and coalesce(price_type, '') <> 'unpriced'""", [r.c4, issued]).fetchone()[0]
         assert r.n_prod == want
     for r in d.itertuples():
-        issued = con.execute("""select min(o.issued_month) from signal_outcome o join signal_ledger l using (signal_id)
-            where l.market_c4 = ? and l.signal_date = ? and o.check_month = ? and o.signal_type = 'PRICE_PENDING'
-              and o.outcome in ('realized', 'realized_partial')""", [r.c4, r.signal_date, r.check_month]).fetchone()[0]
-        n_unpriced = con.execute("""select count(*) from product_state_month where c4 = ? and list_month = ? and state_asof = 'unpriced'""",
-                                 [r.c4, issued]).fetchone()[0]
+        issued = con.execute(q, [r.c4, r.signal_date, r.check_month]).fetchone()[0]
+        n_unpriced = con.execute("""select count(*) from state_month_v5 where c4 = ? and list_month = ? and state = 'reimbursed'
+                                    and price_type = 'unpriced'""", [r.c4, issued]).fetchone()[0]
         assert n_unpriced > 0 and r.n_prod_sens - (0 if pd.isna(r.n_prod_main) else r.n_prod_main) == n_unpriced
-
-
-@db
-def test_extra_draw_deterministic(con):
-    """추가 추출: 같은 층·같은 제외 집합이면 같은 기록, 이미 뽑힌 기록은 고르지 않는다"""
-    from pbd.ledger import s4_analysis as S4
-    c = duckdb.connect(str(DB_PATH), read_only=True)
-    try:
-        a = S4.extra_draw(c, "SUSPEND_SCHEDULED|not_realized|stay", set())
-        b = S4.extra_draw(c, "SUSPEND_SCHEDULED|not_realized|stay", set())
-        x = S4.extra_draw(c, "SUSPEND_SCHEDULED|not_realized|stay", {a})
-    finally:
-        c.close()
-    assert a == b and x != a and a.startswith("SUSPEND_SCHEDULED:")

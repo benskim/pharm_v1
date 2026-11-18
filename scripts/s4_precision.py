@@ -85,7 +85,7 @@ def summarize(rows):
     return out
 
 
-LABELERS = {"claude", "user_reviewed"}
+LABELERS = {"claude", "user_reviewed", "rule_check"}   # rule_check: scripts/rule_check.py 독립 점검 정답 (2026-11-18)
 SOURCES = {"raw", "external"}
 LABELS = ("label_type_correct", "label_date_correct")
 
@@ -131,7 +131,7 @@ def main(path=None):
     if has_labeler:
         badl = [r["sample_id"] for r in rows if (r.get("labeler") or "").strip() not in LABELERS]
         if badl:
-            print(f"labeler가 claude / user_reviewed가 아닌 행: sample_id {', '.join(badl[:20])}")
+            print(f"labeler가 claude / user_reviewed / rule_check가 아닌 행: sample_id {', '.join(badl[:20])}")
             return 1
     has_source = any("label_source" in r for r in rows)
     if has_source:

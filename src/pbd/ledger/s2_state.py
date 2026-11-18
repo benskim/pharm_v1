@@ -459,14 +459,30 @@ def build_all(con) -> None:
     comment_columns(con)
 
 
+# v5 이후 (사용자 지시 2026-11-18, RULES §11-4): v4 판정 표는 기본 DB에 두지 않는다 (보관본 outputs/v4_legacy/).
+# S2의 판정과 무관한 속성(대체조제 목록 값·product_role·오렌지북 연결)은 product_attr_month로 남긴다.
+V4_JUDGMENT_TABLES = ("product_state_month", "s2_state_override", "s2_suspend_signal_check")
+ATTR_COLS = ("product_code", "list_month", "c4", "ingredient_code", "firm", "product_name", "class_code", "price_listed",
+             "in_substitute_list", "product_role", "product_role_carried", "is_bioequiv", "role_conflict", "sub_ref_drug",
+             "sub_bioeq", "sub_bioeq_raw", "sub_equiv", "sub_group_code", "sub_item_code", "sub_price")
+
+
+def build_attr_month(con) -> None:
+    con.execute(f"""create or replace table product_attr_month as select {", ".join(ATTR_COLS)} from product_state_month
+                    order by product_code, list_month""")
+
+
 def main() -> None:
     con = connect()
     con.execute("SET threads=8")
     build_all(con)
-    for t in ("product_state_month", "product_attr_scd2", "bridge_product_item", "bridge_code_recode"):
+    build_attr_month(con)
+    for t in ("product_attr_month", "product_attr_scd2", "bridge_product_item", "bridge_code_recode"):
         print(f"{t}: {con.execute(f'select count(*) from {t}').fetchone()[0]:,}행")
     write_audit(con)
     write_tables(con)
+    for t in V4_JUDGMENT_TABLES:
+        con.execute(f"drop table if exists {t}")
     con.execute("checkpoint")
     con.close()
 

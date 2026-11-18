@@ -16,7 +16,11 @@ pytestmark = pytest.mark.skipif(not DB_PATH.exists(), reason="pbd.duckdb 없음 
 
 @pytest.fixture(scope="module")
 def con():
-    c = duckdb.connect(str(DB_PATH), read_only=True)
+    # v4 회귀 시험: v4 판정 표는 보관본(outputs/v4_legacy/)에서 읽는다 (RULES §11-4, 2026-11-18)
+    from conftest import LEGACY_DB, v4_connect
+    if not LEGACY_DB.exists():
+        pytest.skip("v4 보관본 없음 (make p1-v4-legacy)")
+    c = v4_connect()
     if not c.execute("select count(*) from information_schema.tables where table_name = 'event_ledger'").fetchone()[0]:
         pytest.skip("event_ledger 없음 (make p1-s3)")
     yield c
@@ -169,7 +173,9 @@ def test_incremental_equals_batch_real(con, cut):
     from pbd.ledger import s3_ledger as S3
     c = connect(None)
     try:
+        from conftest import LEGACY_DB
         c.execute(f"attach '{DB_PATH.as_posix()}' as src (read_only)")
+        c.execute(f"attach '{LEGACY_DB.as_posix()}' as v4 (read_only)")
         for t in ("stg_benefit", "stg_substitute", "note_token"):
             c.execute(f"create table {t} as select * from src.{t} where list_month <= '{cut}'")
         for t in ("attr_2026_product", "attr_2026_item"):
@@ -183,7 +189,7 @@ def test_incremental_equals_batch_real(con, cut):
             # realized_after_followup도 사후 참고 컬럼 (뒤의 스냅샷에 따라 바뀜)
             ("select * exclude (realized_after_followup) from {db}signal_outcome where check_month <= ? order by signal_id", [cut]),
         ):
-            assert c.execute(q.format(db=""), args).fetchall() == c.execute(q.format(db="src."), args).fetchall(), q[:60]
+            assert c.execute(q.format(db=""), args).fetchall() == c.execute(q.format(db="v4."), args).fetchall(), q[:60]
     finally:
         c.close()
 

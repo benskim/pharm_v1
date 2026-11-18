@@ -16,6 +16,10 @@ suspend_signal:
     match: {signal_month: "2022-05", token_type: "R3b", token_date: "2022-08-01"}
     expected_count: 72
     cause: "8월 급여정지에 대한 집행정지"   # 원본 사유는 stay (확인 스냅샷 2022-08에 집행정지 비고)
+    stay_target: ["2022-05-09"]         # v5 (RULES §5): 이 급여중지 예고를 막은 집행정지 (stay_target_source = external, sample 61)
+    outcome_external:                   # v5 (사용자 결정 2026-11-18): 집행정지 중 삭제된 11건(stay_then_delisted)의 외부 근거
+      reason: stay_then_delisted
+      note: "급여중지가 시행되지 않음: 고시 제2022-117호, 서울행정법원 2022아11352 (2022-05-09 잠정 인용, 2022-05-31 인용)"
     note: "동아에스티(주) 72개 제품. 같은 칸의 집행정지(22.5.3.)는 122개 품목 약가인하에 대한 것이고 8월 급여정지에 대한 것이 아니다 (사용자 확인). 급여정지에 대한 집행정지: 2022-05-09 잠정(데이터 비고 `집행정지(22.5.9.)`의 날짜. 5/10은 기사 보도일), 6/3 연장(12/2까지), 12/1 재연장 (외부 보도)"
     evidence:
       - https://dailypharm.com/user/news/39450
@@ -28,6 +32,7 @@ price_signal:
     match: {issued_month: "2022-05", signal_date: "2022-05-04", reason: "price_kept_stay_note"}
     expected_count: 74
     cause: "약가인하 잠정 효력정지"
+    stay_target: ["2022-05-03"]         # v5 (RULES §5): 이 약가 예고를 막은 집행정지 (stay_target_source = external)
     note: "동아에스티(주) 122개 품목 약가인하에 대한 잠정 효력정지. 집행정지 날짜는 데이터 비고 2022-05-03 (기사 보도일 2022-05-04)"
     evidence:
       - https://medigatenews.com/news/2233088369
@@ -78,3 +83,24 @@ event:
     evidence:
       - https://nedrug.mfds.go.kr/pbp/CCBBB01/getItemDetail?itemSeq=201500533
       - https://www.health.kr/drug/2015020200023
+
+# v5 (RULES §4.4): 급여중지 표시가 해제 문구 없이 사라졌을 때 외부로 확인한 실제 해제일. 급여목록 기준 유효일을 덮어쓴다 (date_source = external)
+suspend_lift:
+  - id: lokotan_2024_01
+    product_code: "654700150"
+    mark_date: "2022-10-20"             # 급여목록 표시 급여정지(22.10.20.), 2023-12까지 표시
+    lift_date: "2024-01-04"             # 급여목록 기준 2024-01-01
+    note: "케이엠에스제약 로코탄정 건강보험 적용 재개, 1월 4일부터 (sample 42, 사용자 판정 2026-11-18)"
+    evidence:
+      - https://www.newsthevoice.com/news/articleView.html?idxno=36093
+
+# v5 (RULES §6.2·§11-9, 사용자 결정 2026-11-18): 집행정지 없이 예정일 전 삭제된 약가 예고 = 판정 제외(대상 소멸). 외부 원인
+target_gone:
+  - id: voluntary_withdrawal_2024
+    reason_external: "허가 자진취하 (사용자 확인 2026-11-18)"
+    note: "파로마정·심바스트씨알정·유나신정375mg·뉴트리플렉스48주사"
+    signal_ids:
+      - "PRICE_NOTICE:052700390:2024-03-01"      # 파로마정(프로시클리딘염산염)
+      - "PRICE_NOTICE:643501450:2024-07-01"      # 심바스트씨알정(심바스타틴)
+      - "PRICE_NOTICE:648900640:2024-07-01"      # 유나신정375mg(설타미실린토실산염수화물)
+      - "PRICE_NOTICE:667400020:2024-07-01"      # 뉴트리플렉스48주사

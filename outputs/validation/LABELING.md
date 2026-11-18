@@ -78,3 +78,13 @@
 | 22·35 | Y/Y 유지 | user_reviewed / raw | 예고일이 있어 그날 시행 |
 | 2 | Y/(비움→Y) | user_reviewed / raw | 업체명만 다름: 양도양수가 아니라 회사 이름 개명 |
 | 59 | Y/Y 유지 | user_reviewed / raw | 같은 품목, 함량 표기 방식만 바뀜 (6.39mg 에스시탈로프람옥살산염 실제 질량 = 5mg 에스시탈로프람 환산 질량) |
+
+## 정답 칸 (2026-11-18 사용자 지시, `scripts/v5_labels.py`)
+라벨이 원장 버전에 묶이지 않도록 행마다 정답을 둔다. `label_*`은 원장 주장(`ledger_v5_*`)과 정답을 비교해 다시 계산한 값이다. 개정 전 원장(v4)과 비교한 값은 `label_*_v4`, 이전 라벨은 `prev_*`에 남긴다.
+| 칸 | 뜻 |
+|---|---|
+| `truth_type` | 이벤트 `EVENT_TYPE\|kind` (예: `SUCCESSION\|transfer`, `DELISTING\|delisting_spec`), 신호 `SIGNAL_TYPE\|FINAL_OUTCOME[:사유]` + `\|blocked`(집행정지로 막힘), 기록이 없어야 하면 `NONE`. `*` = 결과값은 규칙대로 (사용자는 막힘만 판정) |
+| `truth_date` | 유효일 ISO, 삭제 구간은 `lo~hi`, 신호는 `신호일;확인 달` |
+| `truth_note` | 근거 |
+| `labeler` | `user_reviewed` (사용자 판정 26행) / `rule_check` (`scripts/rule_check.py`가 data/raw만으로 RULES를 적용, 35행) |
+v4 주장은 RULES §0 대응으로 이름을 바꿔 비교한다 (`docs/DECISIONS.md` 2026-11-18). 정밀도: `outputs/validation/precision_v5.csv`.

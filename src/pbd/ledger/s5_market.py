@@ -1,10 +1,10 @@
-"""P1 S5: 분석 B·C (docs/PLAN_P1.md §5 B1, B2, C).
+"""P1 S5 (v5 원장, 2026-11-18 이전: state_month_v5·ev_v5·cal_v5, state = 그 달 1일 as_known, 실질 신규 = LISTING new_listing): 분석 B·C (docs/PLAN_P1.md §5 B1, B2, C).
 
 data/interim/pbd.duckdb의 S2·S3 표와 stg_usage에서 outputs/s5/*.csv를 만든다.
 - B1 전가율: 성분×월(전월 → 그 달)마다 목록 가격 변화(제품 수 가중, 두 달 모두 reimbursed인 같은 제품의 로그 변화 평균)와
   성분 원외 단가(청구금액 ÷ 청구수량) 로그 변화. 목록 가격이 바뀐 쌍에서 기울기(OLS, 성분 단위 부트스트랩 95% 구간).
   1에서 벗어나는 부분은 구성 변화(제품 비중, 신호 없는 제품, 수량 단위)이며 "잔차"로만 말한다.
-- B2 진입 군집: 한 관측월에 실질 신규 품목(LISTING new_item)을 낸 업체가 5곳 이상인 성분×월.
+- B2 진입 군집: 한 관측월에 실질 신규 품목(v5 LISTING new_listing, 허가 연결 있음)을 낸 업체가 5곳 이상인 성분×월.
   같은 시기 기존 제품의 가격 변경과 분리하지 않는다. 사용통계가 진입 전에 관측됐는지를 함께 적는다.
 - C 대체조제 그룹: 그룹(①주성분 및 투여제형코드 × 주성분코드)별 최저·최고·대조약 상한금액과 성분 원외 금액. 절감액은 계산하지 않는다.
 사용: PYTHONPATH=src python -m pbd.ledger.s5_market   (make p1-s5)
@@ -61,11 +61,11 @@ def boot_slope(df: pd.DataFrame, seed: int, n_boot: int = N_BOOT) -> tuple[float
 def build_b1_pairs(con) -> pd.DataFrame:
     """성분×월 쌍마다 목록 가격 변화, 원외 단가 변화, 탈락 단계"""
     con.execute("""create or replace temp table _b1 as
-        with cal as (select prev_month m0, list_month m1 from s3_cal where prev_month is not null),
+        with cal as (select prev_month m0, list_month m1 from cal_v5 where prev_month is not null),
              pr as (select a.c4, c.m1 as month, a.product_code,
-                           a.state_asof s0, b.state_asof s1, a.price_listed p0, b.price_listed p1
-                    from cal c join product_state_month a on a.list_month = c.m0
-                    join product_state_month b on b.list_month = c.m1 and b.product_code = a.product_code and b.c4 = a.c4),
+                           a.state s0, b.state s1, a.price_listed p0, b.price_listed p1
+                    from cal c join state_month_v5 a on a.list_month = c.m0
+                    join state_month_v5 b on b.list_month = c.m1 and b.product_code = a.product_code and b.c4 = a.c4),
              pairs as (select c4, month, count(*) n_both,
                               count(*) filter (where s0 = 'reimbursed' and s1 = 'reimbursed' and p0 > 0 and p1 > 0) n_basket,
                               -- 소수 12자리 반올림: 병렬 집계의 덧셈 순서로 끝자리가 달라지지 않게 (같은 입력 → 같은 출력, 2026-11-17)
@@ -73,14 +73,14 @@ def build_b1_pairs(con) -> pd.DataFrame:
                               count(*) filter (where s0 = 'reimbursed' and s1 = 'reimbursed' and p0 > 0 and p1 > 0 and p1 <> p0) n_changed
                        from pr group by 1, 2),
              -- 월 중간에 적용된 가격 변경: 유효일이 전월 또는 그 달 안이고 1일이 아님 → 사용통계의 두 달에 나뉘어 들어간다
-             mid as (select distinct e.market_c4 c4, c.m1 as month from event_ledger e join cal c
+             mid as (select distinct e.market_c4 c4, c.m1 as month from ev_v5 e join cal c
                        on strftime(e.effective_date, '%Y-%m') in (c.m0, c.m1)
                      where e.event_type = 'PRICE_CHANGE' and day(e.effective_date) <> 1),
              -- 구성 변화: 그 관측월에 성분 안의 진입·퇴출·양도양수·정지·복귀 이벤트
-             comp as (select market_c4 c4, observed_month as month, count(*) n_comp from event_ledger
-                      where event_type in ('LISTING', 'DELISTING', 'TRANSFER', 'SUSPEND', 'RESUME') group by 1, 2),
+             comp as (select market_c4 c4, observed_month as month, count(*) n_comp from ev_v5
+                      where event_type in ('LISTING', 'DELISTING', 'SUCCESSION', 'DELISTING_STAY', 'SUSPEND', 'SUSPEND_LIFT') group by 1, 2),
              -- 등재·삭제만 (B1 대조군 좁힌 기준선, 사용자 결정 2026-11-16)
-             ld as (select market_c4 c4, observed_month as month, count(*) n_ld from event_ledger
+             ld as (select market_c4 c4, observed_month as month, count(*) n_ld from ev_v5
                     where event_type in ('LISTING', 'DELISTING') group by 1, 2)
         select p.*, c.m0 prev_month,
                coalesce(u0.observed_out, false) obs0, coalesce(u1.observed_out, false) obs1,
@@ -115,11 +115,11 @@ def effective_month_prices(con) -> pd.DataFrame:
     - e가 o보다 앞 달이면: e의 달 ~ o 전달의 각 달에서 max(e, 그 달 1일)부터 말일까지를 a로 본다 (그 달 스냅샷 금액이 b일 때만)
     - e가 o 안이고 1일이 아니면: o의 1일 ~ e 전날을 b로 본다
     판매량이 아니라 달력 일수로 나눈다. exposure_frac(급여 일수 비율, 사후 칸)은 쓰지 않는다."""
-    psm = con.execute("""select product_code, list_month, c4, state_asof, price_listed from product_state_month""").df()
+    psm = con.execute("""select product_code, list_month, c4, state, price_listed from state_month_v5""").df()
     ev = con.execute("""select e.product_code, e.observed_month o, e.effective_date e, b.price_listed b, a.price_listed a
-        from event_ledger e join s3_cal k on k.list_month = e.observed_month
-        join product_state_month a on a.product_code = e.product_code and a.list_month = e.observed_month
-        join product_state_month b on b.product_code = e.product_code and b.list_month = k.prev_month
+        from ev_v5 e join cal_v5 k on k.list_month = e.observed_month
+        join state_month_v5 a on a.product_code = e.product_code and a.list_month = e.observed_month
+        join state_month_v5 b on b.product_code = e.product_code and b.list_month = k.prev_month
         where e.event_type = 'PRICE_CHANGE' and a.price_listed > 0 and b.price_listed > 0""").df()
     psm["p_eff"] = psm["price_listed"].astype(float)
     idx = psm.set_index(["product_code", "list_month"]).index
@@ -154,14 +154,14 @@ def b1_effective_pairs(con, pairs: pd.DataFrame) -> pd.DataFrame:
     바구니(두 달 모두 reimbursed, 금액 있음)와 원외 단가는 그대로. stage_eff_daywt: 월 중간 변경을 일수로 나눠 넣는다 (제외 4 없음).
     stage_eff_excl_mid: 같은 목록 변화에 관측월 기준의 제외 4(월 중간 적용 변경)를 그대로 둔다."""
     psm = effective_month_prices(con)
-    con.register("_peff", psm[["product_code", "list_month", "c4", "state_asof", "p_eff"]])
-    x = con.execute("""with cal as (select prev_month m0, list_month m1 from s3_cal where prev_month is not null)
+    con.register("_peff", psm[["product_code", "list_month", "c4", "state", "p_eff"]])
+    x = con.execute("""with cal as (select prev_month m0, list_month m1 from cal_v5 where prev_month is not null)
         select a.c4, c.m1 as month,
                round(avg(ln(b.p_eff / a.p_eff)), 12) dlog_list_eff,      -- 소수 12자리 반올림 (병렬 집계 끝자리, 2026-11-17)
                count(*) filter (where abs(ln(b.p_eff / a.p_eff)) > 1e-12) n_changed_eff
         from cal c join _peff a on a.list_month = c.m0
         join _peff b on b.list_month = c.m1 and b.product_code = a.product_code and b.c4 = a.c4
-        where a.state_asof = 'reimbursed' and b.state_asof = 'reimbursed' and a.p_eff > 0 and b.p_eff > 0
+        where a.state = 'reimbursed' and b.state = 'reimbursed' and a.p_eff > 0 and b.p_eff > 0
         group by 1, 2""").df()
     con.unregister("_peff")
     df = pairs.merge(x, on=["c4", "month"], how="left")
@@ -283,7 +283,7 @@ def disclosure_detail(con) -> dict[str, pd.DataFrame]:
     con.execute("""create or replace temp table _disc as
         with l as (select c4, list_month as month, count(distinct firm) nf, count(*) np,
                           count(*) filter (where substr(ingredient_code, 7, 1) = 'B') n_inj
-                   from product_state_month where state_asof = 'reimbursed' group by 1, 2)
+                   from state_month_v5 where state = 'reimbursed' group by 1, 2)
         select l.*, case when n_inj = np then 'injection_only' when n_inj > 0 then 'injection_mixed' else 'non_injection' end route_group,
                coalesce(z.observed_out, false) obs_out, coalesce(z.observed_any, false) and not coalesce(z.observed_out, false) obs_in_only
         from l left join usage_c4_month z using (c4, month)""")
@@ -323,8 +323,8 @@ def b2_scope(cl: pd.DataFrame) -> pd.DataFrame:
 def build_b2(con) -> dict[str, pd.DataFrame]:
     con.execute(f"""create or replace temp table _b2c as
         with e as (select e.market_c4 c4, e.observed_month as month, e.product_code, q.firm, e.effective_date
-                   from event_ledger e join product_state_month q on q.product_code = e.product_code and q.list_month = e.observed_month
-                   where e.event_type = 'LISTING' and e.kind = 'new_item')
+                   from ev_v5 e join state_month_v5 q on q.product_code = e.product_code and q.list_month = e.observed_month
+                   where e.event_type = 'LISTING' and e.kind = 'new_listing' and e.link_basis is null)
         select c4, month, count(distinct firm) n_entry_firms, count(*) n_entry_products,
                min(effective_date) eff_min, max(effective_date) eff_max
         from e group by 1, 2""")
@@ -333,30 +333,30 @@ def build_b2(con) -> dict[str, pd.DataFrame]:
                                  substr(month, 1, 4) as year, count(*) n from _b2c group by 1, 2 order by 1, 2""").df()
     lo, hi = B2_WINDOW
     con.execute(f"""create or replace temp table _b2 as
-        with cl as (select c.*, k.mi, k.prev_month from _b2c c join s3_cal k on k.list_month = c.month where n_entry_firms >= {B2_MIN_FIRMS}),
-             w as (select cl.c4, cl.month, k.list_month wm, k.mi - cl.mi rel from cl join s3_cal k on k.mi between cl.mi + {lo} and cl.mi + {hi}),
-             firms as (select w.c4, w.month, w.rel, count(distinct q.firm) filter (where q.state_asof = 'reimbursed') n_firms,
-                              count(*) filter (where q.state_asof = 'reimbursed') n_products,
-                              min(q.price_listed) filter (where q.state_asof = 'reimbursed') min_price
-                       from w left join product_state_month q on q.c4 = w.c4 and q.list_month = w.wm group by 1, 2, 3),
+        with cl as (select c.*, k.mi, k.prev_month from _b2c c join cal_v5 k on k.list_month = c.month where n_entry_firms >= {B2_MIN_FIRMS}),
+             w as (select cl.c4, cl.month, k.list_month wm, k.mi - cl.mi rel from cl join cal_v5 k on k.mi between cl.mi + {lo} and cl.mi + {hi}),
+             firms as (select w.c4, w.month, w.rel, count(distinct q.firm) filter (where q.state = 'reimbursed') n_firms,
+                              count(*) filter (where q.state = 'reimbursed') n_products,
+                              min(q.price_listed) filter (where q.state = 'reimbursed') min_price
+                       from w left join state_month_v5 q on q.c4 = w.c4 and q.list_month = w.wm group by 1, 2, 3),
              -- 군집 전월에 이미 있던 제품의 가격 변경 (관측월 m−1 ~ m+3). 기존 제품 인하와 진입을 분리하지 않는다
-             pre as (select cl.c4, cl.month, q.product_code, q.product_role from cl join product_state_month q
-                       on q.c4 = cl.c4 and q.list_month = cl.prev_month and q.state_asof = 'reimbursed'),
+             pre as (select cl.c4, cl.month, q.product_code, q.product_role from cl join state_month_v5 q
+                       on q.c4 = cl.c4 and q.list_month = cl.prev_month and q.state = 'reimbursed'),
              pc as (select pre.c4, pre.month, count(distinct pre.product_code) n_pre,
                            count(distinct pre.product_code) filter (where pre.product_role = 'reference') n_pre_ref,
                            count(distinct e.product_code) n_pre_price_change,
                            count(distinct e.product_code) filter (where pre.product_role = 'reference') n_pre_ref_price_change
-                    from pre left join event_ledger e on e.product_code = pre.product_code and e.event_type = 'PRICE_CHANGE'
-                         and e.observed_month in (select k.list_month from s3_cal k, s3_cal m0 where m0.list_month = pre.month
+                    from pre left join ev_v5 e on e.product_code = pre.product_code and e.event_type = 'PRICE_CHANGE'
+                         and e.observed_month in (select k.list_month from cal_v5 k, cal_v5 m0 where m0.list_month = pre.month
                                                   and k.mi between m0.mi - 1 and m0.mi + 3)
                     group by 1, 2),
              ref as (select cl.c4, cl.month, avg(b.price_listed / a.price_listed - 1) ref_price_chg
-                     from cl join s3_cal k3 on k3.mi = least(cl.mi + 3, 48)
-                     join product_state_month a on a.c4 = cl.c4 and a.list_month = cl.prev_month and a.product_role = 'reference' and a.state_asof = 'reimbursed'
-                     join product_state_month b on b.product_code = a.product_code and b.list_month = k3.list_month and b.price_listed > 0
+                     from cl join cal_v5 k3 on k3.mi = least(cl.mi + 3, 48)
+                     join state_month_v5 a on a.c4 = cl.c4 and a.list_month = cl.prev_month and a.product_role = 'reference' and a.state = 'reimbursed'
+                     join state_month_v5 b on b.product_code = a.product_code and b.list_month = k3.list_month and b.price_listed > 0
                      group by 1, 2)
         select cl.c4, cl.month, cl.n_entry_firms, cl.n_entry_products, cl.eff_min, cl.eff_max,
-               (select min(q.ingredient_code) from product_state_month q where q.c4 = cl.c4 and q.list_month = cl.month) ingredient_code,
+               (select min(q.ingredient_code) from state_month_v5 q where q.c4 = cl.c4 and q.list_month = cl.month) ingredient_code,
                (select min(b.ingredient_name) from stg_benefit b where b.c4 = cl.c4 and b.list_month = cl.month and b.ingredient_name is not null) ingredient_name,
                f0.n_firms firms_before, f1.n_firms firms_month, f3.n_firms firms_after3,
                f0.min_price min_price_before, f3.min_price min_price_after3,
@@ -376,9 +376,9 @@ def build_b2(con) -> dict[str, pd.DataFrame]:
         left join pc on pc.c4 = cl.c4 and pc.month = cl.month
         left join ref on ref.c4 = cl.c4 and ref.month = cl.month
         left join (select c4, min(first_observed_month_out) first_observed_month_out from usage_c4_month group by 1) z on z.c4 = cl.c4
-        left join s3_cal km on km.list_month = cl.month
-        left join s3_cal k0 on k0.mi = km.mi - 1
-        left join s3_cal k3 on k3.mi = km.mi + {hi}
+        left join cal_v5 km on km.list_month = cl.month
+        left join cal_v5 k0 on k0.mi = km.mi - 1
+        left join cal_v5 k3 on k3.mi = km.mi + {hi}
         left join _up p0 on p0.c4 = cl.c4 and p0.month = k0.list_month
         left join _up p1 on p1.c4 = cl.c4 and p1.month = cl.month
         left join _up p3 on p3.c4 = cl.c4 and p3.month = k3.list_month""")
@@ -410,15 +410,15 @@ def b2_pre_truncated(cl: pd.DataFrame) -> pd.DataFrame:
 def b2_case_series(con, c4: str, month: str) -> pd.DataFrame:
     """사례 하나의 월별 업체 수·최저/최고가·원외 단가 (군집 관측월 −3 ~ +3)"""
     lo, hi = B2_WINDOW
-    return con.execute(f"""with m0 as (select mi from s3_cal where list_month = ?)
+    return con.execute(f"""with m0 as (select mi from cal_v5 where list_month = ?)
         select k.list_month as month, k.mi - m0.mi rel,
                count(distinct q.firm) firms_all, count(q.product_code) products_all,
-               count(distinct q.firm) filter (where q.state_asof = 'reimbursed') firms,
-               count(*) filter (where q.state_asof = 'reimbursed') products,
-               min(q.price_listed) filter (where q.state_asof = 'reimbursed') min_price,
-               max(q.price_listed) filter (where q.state_asof = 'reimbursed') max_price,
+               count(distinct q.firm) filter (where q.state = 'reimbursed') firms,
+               count(*) filter (where q.state = 'reimbursed') products,
+               min(q.price_listed) filter (where q.state = 'reimbursed') min_price,
+               max(q.price_listed) filter (where q.state = 'reimbursed') max_price,
                round(any_value(u.up), 1) up, any_value(z.observed_out) observed_out
-        from m0, s3_cal k left join product_state_month q on q.c4 = ? and q.list_month = k.list_month
+        from m0, cal_v5 k left join state_month_v5 q on q.c4 = ? and q.list_month = k.list_month
         left join _up u on u.c4 = ? and u.month = k.list_month
         left join usage_c4_month z on z.c4 = ? and z.month = k.list_month
         where k.mi between m0.mi + {lo} and m0.mi + {hi} group by 1, 2 order by 1""", [month, c4, c4, c4]).df()
@@ -426,7 +426,7 @@ def b2_case_series(con, c4: str, month: str) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- C
 def build_c(con, month: str = C_MONTH) -> dict[str, pd.DataFrame]:
-    """대체조제 그룹 순위표. 그룹 = (sub_group_code, ingredient_code), 그 달 대체조제 목록에 있고 state_asof = reimbursed,
+    """대체조제 그룹 순위표. 그룹 = (sub_group_code, ingredient_code), 그 달 대체조제 목록에 있고 state = reimbursed,
     상한금액이 있는 제품. 성분 원외 금액은 성분4 단위라 같은 성분4의 여러 그룹이 같은 금액을 가진다."""
     # 표본 회귀 (PLAN F10): 대체조제 목록 원본 행 기준 (정지·산정불가 포함, 대체조제 목록 금액)
     f10 = con.execute("""with g as (select group_code, ingredient_code, count(*) n, min(price) mn, max(price) mx
@@ -436,7 +436,7 @@ def build_c(con, month: str = C_MONTH) -> dict[str, pd.DataFrame]:
     year = month[:4]
     con.execute("""create or replace temp table _c as
         with p as (select sub_group_code grp, ingredient_code, c4, product_code, firm, price_listed price, sub_ref_drug ref
-                   from product_state_month where list_month = ? and in_substitute_list and state_asof = 'reimbursed' and price_listed > 0),
+                   from state_month_v5 where list_month = ? and in_substitute_list and state = 'reimbursed' and price_listed > 0),
              g as (select grp, ingredient_code, min(c4) c4, count(*) n_products, count(distinct firm) n_firms,
                           min(price) min_price, max(price) max_price, median(price) median_price,
                           count(*) filter (where ref) n_ref, min(price) filter (where ref) ref_min, max(price) filter (where ref) ref_max
@@ -484,10 +484,10 @@ def c_by_c4(rank: pd.DataFrame, total_amt: float) -> dict[str, pd.DataFrame]:
 
 
 def disclosure_check(con) -> pd.DataFrame:
-    """목록의 성분×월 업체·제품 수(state_asof = reimbursed)와 사용통계 원외 관측 여부.
+    """목록의 성분×월 업체·제품 수(state = reimbursed)와 사용통계 원외 관측 여부.
     DATA.md의 비공개 규칙(품목 수 또는 업체 수 2개 이하 제외)을 목록 쪽 수로 대조한다. 규칙을 정하지 않고 건수만 낸다."""
     return con.execute("""with l as (select c4, list_month as month, count(distinct firm) nf, count(*) np
-                                      from product_state_month where state_asof = 'reimbursed' group by 1, 2)
+                                      from state_month_v5 where state = 'reimbursed' group by 1, 2)
         select case when nf <= 2 and np <= 2 then 'a_firms_le2_products_le2' when nf <= 2 then 'b_firms_le2_products_ge3'
                     else 'c_firms_ge3' end list_bucket,
                count(*) c4_months, count(*) filter (where z.observed_out) observed_out,

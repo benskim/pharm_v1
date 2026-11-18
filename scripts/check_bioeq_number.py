@@ -17,7 +17,7 @@ def main() -> None:
     con.execute(r"""create temp table b as
         select product_code, list_month, coalesce(sub_item_code, item_code) item, sub_bioeq_raw raw,
                cast(regexp_extract(sub_bioeq_raw, '\((\d+)\)', 1) as int) num
-        from product_state_month where sub_bioeq_raw is not null""")
+        from product_attr_month where sub_bioeq_raw is not null""")
     summary = con.execute(r"""
         with p as (select product_code, count(distinct num) nd, count(distinct list_month) nm from b group by 1),
              dup as (select list_month, num, count(*) n, count(distinct item) ni from b group by 1, 2 having count(*) > 1),

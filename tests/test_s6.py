@@ -54,7 +54,7 @@ def test_a_same_input_same_hash(tmp_path):
     b = R.write("2024-09", md_dir=tmp_path / "b", csv_dir=tmp_path / "bc")
     assert _sha(a) == _sha(b)
     fa, fb = sorted((tmp_path / "ac/2024-09").glob("*.csv")), sorted((tmp_path / "bc/2024-09").glob("*.csv"))
-    assert [f.name for f in fa] == [f.name for f in fb] and len(fa) == 9
+    assert [f.name for f in fa] == [f.name for f in fb] and len(fa) == 10   # + stay_pending.csv (RULES_2026-11-17 §7)
     assert [_sha(f) for f in fa] == [_sha(f) for f in fb]
     for f in fa:                                                     # F5: 모든 CSV에 기준 시점 칸
         assert set(COMMON) <= set(pd.read_csv(f, nrows=0).columns), f.name
@@ -102,7 +102,7 @@ def test_f11_listing_notices_2025_11(r2511):
     md, t = r2511
     s = t["new_signals"]
     g = s[s["signal_date"].astype(str) == "2025-11-23"].groupby("signal_type").size().to_dict()
-    assert g == {"LISTING_SCHEDULED": 17, "LISTING_NOTE_EXISTING": 10}       # F11: 처음 나타난 제품 17 + 이미 급여 중이던 제품 10
+    assert g == {"LISTING_NOTICE": 17, "LISTING_NOTE_EXISTING": 10}         # v5 이름 (RULES §6)       # F11: 처음 나타난 제품 17 + 이미 급여 중이던 제품 10
     assert "### 등재 예고 (새 제품) 17건" in md and "'25.11.23 등재" in md
     assert "이미 급여 중인 제품. 같은 날 같은 고시에 함께 실렸고 상태는 바뀌지 않는다." in md
     # F2: 등재 줄 = 토파시티닙 (가격 예고가 없어 가격 줄은 없다), F3: 6272·6937 = tofacitinib
@@ -119,7 +119,7 @@ def test_sitagliptin_price_notice_2024_09(r2409):
     row = [l for l in REF.split("## F4 검증", 1)[1].splitlines() if l.startswith("6942 |")][0].split(" | ")
     assert row[1:4] == ["2024-09", "24.9.2", "149"]
     s = t["new_signals"]
-    p = s[(s["signal_type"] == "PRICE_PENDING") & (s["c4"] == "6942")]
+    p = s[(s["signal_type"] == "PRICE_NOTICE") & (s["c4"] == "6942")]
     assert len(p) == int(row[3]) and set(p["signal_date"].astype(str)) == {"2024-09-02"}
     assert re.search(r"\| 6942 \| sitagliptin [^|]+\| sitagliptin \| 2024-09-02 \| 149 / ", md)
     # F1: 기준 기간 = MONTH−7 ~ MONTH−5, n_noticed = 149, 중앙 인하율 = 표의 중앙값
@@ -174,16 +174,16 @@ def usage_src(tmp_path):
 def _impact_con(con):
     """2024-09 발간. A001 reimbursed 4개, 예고 2개: 100 → 80 (r −0.2), 200 → 150 (r −0.25), 예고일 2024-09-11.
     B002 reimbursed 1개 예고 1개 (사용통계 미관측)"""
-    con.execute("""create table product_state_month as select * from (values
+    con.execute("""create table state_month_v5 as select * from (values
         ('a1', '2024-09', 'A001', 'reimbursed', 100.0), ('a2', '2024-09', 'A001', 'reimbursed', 200.0),
         ('a3', '2024-09', 'A001', 'reimbursed', 300.0), ('a4', '2024-09', 'A001', 'reimbursed', 400.0),
         ('a5', '2024-09', 'A001', 'suspended', 500.0), ('b1', '2024-09', 'B002', 'reimbursed', 100.0))
-        t(product_code, list_month, c4, state_asof, price_listed)""")
-    con.execute("""create table signal_ledger as select * from (values
-        ('PRICE_PENDING', 'a1', 'A001', '2024-09', date '2024-09-11', 80.0),
-        ('PRICE_PENDING', 'a2', 'A001', '2024-09', date '2024-09-11', 150.0),
-        ('PRICE_PENDING', 'b1', 'B002', '2024-09', date '2024-10-01', 90.0))
-        t(signal_type, product_code, market_c4, issued_month, signal_date, amount)""")
+        t(product_code, list_month, c4, state, price_listed)""")
+    con.execute("""create table signal_v5 as select * from (values
+        ('PRICE_NOTICE', 'R2', 'a1', 'A001', '2024-09', date '2024-09-11', 80.0),
+        ('PRICE_NOTICE', 'R2', 'a2', 'A001', '2024-09', date '2024-09-11', 150.0),
+        ('PRICE_NOTICE', 'R2', 'b1', 'B002', '2024-09', date '2024-10-01', 90.0))
+        t(signal_type, source_rule, product_code, market_c4, first_month, signal_date, amount)""")
 
 
 def test_f1_impact_hand_values(usage_src):
@@ -214,16 +214,16 @@ def test_f1_reads_no_usage_after_lag(usage_src):
 
 def test_f2_attention_deterministic_ties():
     """동점: 점수가 같으면 예고 제품 수, 그다음 묶음 이름 순. 등재는 새 업체 수 → 기준 금액 → 이름. 삭제는 대체 없는 성분4 기준 금액 합"""
-    rates = pd.DataFrame({"signal_type": ["PRICE_PENDING"], "rate": [0.5]})
+    rates = pd.DataFrame({"signal_type": ["PRICE_NOTICE"], "rate": [0.5]})
     grp = pd.DataFrame({"c4": ["A1", "B1", "C1", "D1"], "group_key": ["beta", "alpha", "gamma", "delta"]})
     labels = {"beta": "beta", "alpha": "alpha", "gamma": "gamma", "delta": "delta"}
-    sig = pd.DataFrame({"signal_type": ["PRICE_PENDING"] * 4, "c4": ["A1", "A1", "B1", "B1"], "product_code": list("wxyz"),
+    sig = pd.DataFrame({"signal_type": ["PRICE_NOTICE"] * 4, "c4": ["A1", "A1", "B1", "B1"], "product_code": list("wxyz"),
                         "signal_date": pd.to_datetime(["2024-09-02"] * 4), "change_pct": [-10.0, -10.0, -20.0, -20.0]})
     imp = pd.DataFrame({"c4": ["A1", "B1"], "impact_listed": [-2.0, -2.0]})
     lstg = pd.DataFrame({"gk": ["gamma", "delta"], "notice_date": pd.to_datetime(["2024-09-10"] * 2), "firms_noticed": [3, 3],
                          "firms_now": [1, 2], "new_firms": [3, 3], "base_amt": [5.0, 5.0]})
     # 삭제: gamma(C1) 대체 없음 1건, 몫 7.0 / delta(D1) 대체 없음 2건(q, s), 몫 3.0 + 1.0, r은 대체 있음 → 건수가 먼저라 delta
-    ev = pd.DataFrame({"event_type": ["DELISTING"] * 4, "kind": ["exit"] * 4, "c4": ["C1", "D1", "D1", "D1"],
+    ev = pd.DataFrame({"event_type": ["DELISTING"] * 4, "kind": ["delisting"] * 4, "c4": ["C1", "D1", "D1", "D1"],
                        "product_code": ["p", "q", "r", "s"], "same_code_remaining": [0, 0, 2, 0],
                        "base_amt": [70.0, 30.0, 30.0, 30.0], "product_share": [7.0, 3.0, 3.0, 1.0]})
     out = [R.attention(sig, imp, lstg, ev, rates, grp, labels) for _ in range(2)]
@@ -259,13 +259,13 @@ def test_f4_remaining_uses_month_snapshot_only():
     """2024-09 삭제 제품 d1(주성분코드 X, 2024-08에만 있음). 같은 X: r1 reimbursed(2024-09) → 1, s1 정지(2024-09) → 제외,
     n1은 2024-10에만 reimbursed → 제외. 같은 성분4 C001: r1, y1(주성분코드 Y) → 2. 다른 성분4 제품은 세지 않는다"""
     con = duckdb.connect()
-    con.execute("""create table product_state_month as select * from (values
+    con.execute("""create table state_month_v5 as select * from (values
         ('d1', '2024-08', 'C001', 'X', 'reimbursed'), ('r1', '2024-09', 'C001', 'X', 'reimbursed'),
         ('s1', '2024-09', 'C001', 'X', 'suspended'), ('y1', '2024-09', 'C001', 'Y', 'reimbursed'),
         ('n1', '2024-10', 'C001', 'X', 'reimbursed'), ('z1', '2024-09', 'C002', 'X2', 'reimbursed'))
-        t(product_code, list_month, c4, ingredient_code, state_asof)""")
-    con.execute("create table s3_cal as select * from (values ('2024-08', null), ('2024-09', '2024-08'), ('2024-10', '2024-09')) t(list_month, prev_month)")
-    con.execute("create table event_ledger as select * from (values ('d1', 'C001', '2024-09')) t(product_code, market_c4, observed_month)")
+        t(product_code, list_month, c4, ingredient_code, state)""")
+    con.execute("create table cal_v5 as select * from (values ('2024-08', null), ('2024-09', '2024-08'), ('2024-10', '2024-09')) t(list_month, prev_month)")
+    con.execute("create table ev_v5 as select * from (values ('d1', 'C001', '2024-09')) t(product_code, market_c4, observed_month)")
     R.remaining_counts(con, "2024-09")
     assert con.execute("select ingredient_code, same_code_remaining, same_c4_remaining from _rem").fetchall() == [("X", 1, 2)]
 
@@ -283,10 +283,12 @@ def test_display_names_synthetic(tmp_path):
         t(ingredient_code, list_month, row_no, ingredient_name, n_ingredients, c4)""")
     c.execute("""create table stg_substitute as select * from (values ('DDD', '2024-02', 1, 'd-subst', 'D001'))
         t(ingredient_code, list_month, row_no, ingredient_name, c4)""")
-    c.execute("""create table product_state_month as select * from (values
-        ('p1', '2024-01', 'A001', 'AAA', '101'), ('p1', '2024-02', 'A001', 'AAA', '101'), ('p2', '2024-02', 'B001', 'BBB', '102'),
-        ('p3', '2024-02', 'C001', 'CCC', '103'), ('p4', '2024-02', 'D001', 'DDD', '104'))
-        t(product_code, list_month, c4, ingredient_code, item_code)""")
+    c.execute("""create table state_month_v5 as select * from (values
+        ('p1', '2024-01', 'A001', 'AAA'), ('p1', '2024-02', 'A001', 'AAA'), ('p2', '2024-02', 'B001', 'BBB'),
+        ('p3', '2024-02', 'C001', 'CCC'), ('p4', '2024-02', 'D001', 'DDD'))
+        t(product_code, list_month, c4, ingredient_code)""")
+    c.execute("""create table s2_product_link as select * from (values ('p1', '101'), ('p2', '102'), ('p3', '103'), ('p4', '104'))
+        t(product_code, item_code)""")
     di = tmp_path / "di.parquet"
     pd.DataFrame({"품목기준코드": [101, 102], "주성분": ["텔미사르탄/암로디핀", "비/비"]}).to_parquet(di)
     R._names(c, "2024-02", di)
@@ -317,3 +319,14 @@ def test_f4_product_share(r2511):
     x = e[e["product_share"].notna()]
     assert len(x) > 0
     assert ((x["product_share"] - x["base_amt"] / x["n_products_c4"]).abs() < 0.01).all()
+
+
+@real
+def test_rate_note_and_blocked_amount_line(r2409):
+    """사용자 지시 2026-11-18: §2에 '결과가 새로 나면 B·A가 달마다 바뀐다' 설명 줄, 그 달 새로 기록된 막힌 인하 처분(대체조제 금액 신호)은 한 줄.
+    2024-10: 금액 차이 신호 48건 (RULES §1·§11-5, 2024-10 분), 2024-09: 없음"""
+    md = r2409[0]
+    assert "같은 유형이라도 리포트 달마다 B와 A가 달라진다." in md
+    assert "막힌 인하 처분 (대체조제 목록 금액" not in md
+    md10, _ = R.render("2024-10")
+    assert re.search(r"이번 달 새로 기록된 막힌 인하 처분 \(대체조제 목록 금액, 급여목록에 새 집행정지\) 48건 · 성분4 \d+개", md10)

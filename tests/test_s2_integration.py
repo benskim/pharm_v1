@@ -18,7 +18,11 @@ pytestmark = pytest.mark.skipif(not DB_PATH.exists(), reason="pbd.duckdb 없음 
 
 @pytest.fixture(scope="module")
 def con():
-    c = duckdb.connect(str(DB_PATH), read_only=True)
+    # v4 회귀 시험: v4 판정 표는 보관본(outputs/v4_legacy/)에서 읽는다 (RULES §11-4, 2026-11-18)
+    from conftest import LEGACY_DB, v4_connect
+    if not LEGACY_DB.exists():
+        pytest.skip("v4 보관본 없음 (make p1-v4-legacy)")
+    c = v4_connect()
     c.execute("SET enable_progress_bar=false")
     if not c.execute("select count(*) from information_schema.tables where table_name = 'product_state_month'").fetchone()[0]:
         pytest.skip("product_state_month 없음 (make p1-s2)")

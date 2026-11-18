@@ -3,11 +3,11 @@ PY ?= .venv/bin/python
 export PYTHONPATH := src
 
 .PHONY: help venv sample s0 check-sample test p1-all \
-        p1-s1 p1-s2 p1-s3 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
+        p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
         p2-t1 p2-t2 p2-t3 p2-t4 p2-t5 all
 
 help:
-	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
+	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
 
 venv:
 	python3.11 -m venv .venv && $(PY) -m pip install -r requirements.txt
@@ -47,10 +47,22 @@ p1-s2:
 	$(PY) -m pbd.ledger.s2_state
 	$(PY) -m pytest -q tests/test_state_rules.py tests/test_s2_synthetic.py tests/test_s2_integration.py
 
-# P1 S3: 신호·이벤트 원장 → signal_ledger, signal_outcome, event_ledger (data/interim/pbd.duckdb), 표 outputs/s3/
-p1-s3:
-	$(PY) -m pbd.ledger.s3_ledger
-	$(PY) -m pytest -q tests/test_s3_synthetic.py tests/test_s3_integration.py
+# P1 S3 (v4 원장, 기본 경로 아님, RULES §11-4): v4 보관본 outputs/v4_legacy/ 만들기와 v4 회귀 시험
+p1-v4-legacy:
+	$(PY) -I scripts/v4_legacy_export.py $(if $(FORCE),--force,)
+	$(PY) -m pytest -q tests/test_s3_synthetic.py tests/test_s3_integration.py tests/test_s2_integration.py
+
+p1-s3: p1-v4-legacy
+
+# P1 원장 v5 (docs/RULES_2026-11-17.md): v5 표 → 독립 점검(rule_check, data/raw만) → 라벨 정답 칸·정밀도 → 개정 전후 비교. 표 outputs/v5/
+p1-v5:
+	$(PY) -I scripts/v4_legacy_export.py
+	$(PY) -m pbd.ledger.v5_build
+	$(PY) -I scripts/rule_check.py > /dev/null
+	$(PY) -I scripts/v5_labels.py
+	$(PY) -I scripts/v5_compare.py > /dev/null
+	$(PY) -I scripts/v5_1_checks.py > /dev/null
+	$(PY) -m pytest -q tests/test_v5_rules.py tests/test_v5_integration.py
 
 # P1 S4: 분석 A (A1~A6) → outputs/s4/. 표본은 sample_60.new.csv(최종 라벨이 있을 때) 또는 sample_60.generated.csv. 정밀도: `make p1-s4-precision` (sample_60.user_reviewed.csv)
 p1-s4:
@@ -84,6 +96,6 @@ p2-t1 p2-t2 p2-t3 p2-t4 p2-t5:
 	$(TODO)
 
 # P1 전체. P2 단계는 구현한 뒤 all에 넣는다 (사용자 결정 2026-11-16)
-p1-all: s0 check-sample p1-s1 p1-s2 p1-s3 p1-s4 p1-s5 p1-s6 test
+p1-all: s0 check-sample p1-s1 p1-s2 p1-v5 p1-s4 p1-s5 p1-s6 test
 
 all: p1-all

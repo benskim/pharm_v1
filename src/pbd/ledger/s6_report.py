@@ -31,7 +31,6 @@ import pandas as pd
 
 from pbd.common import DB_PATH, ROOT, connect, load_yaml
 from pbd.ledger import s2_state as S2
-from pbd.ledger import s3_ledger as S3
 
 OUT_MD = ROOT / "outputs/reports"
 OUT_CSV = ROOT / "outputs/dashboard"
@@ -50,28 +49,31 @@ DRUG_INFO = ROOT / "data/raw/master/dim_drug_info_26.parquet"
 TOP_C4 = 20
 LIST_ROWS = 20               # Markdown 목록 행 수 (전체는 CSV)
 
-SIGNAL_LABEL = {
-    "PRICE_PENDING": "가격 변경 예고",
-    "LISTING_SCHEDULED": "등재 예고 (새 제품)",
+SIGNAL_LABEL = {                                    # v5 신호 유형 (RULES_2026-11-17 §6)
+    "PRICE_NOTICE": "약가 예고",
+    "LISTING_NOTICE": "등재 예고 (새 제품)",
     "LISTING_NOTE_EXISTING": "등재 예고 비고 (이미 급여 중인 제품)",
-    "SUSPEND_SCHEDULED": "급여정지 예고",
-    "RESUME_SCHEDULED": "급여정지 종료 예고",
-    "STAY_RELEASE_PRICE": "집행정지 해제·인하 예고",
-    "DELISTING_SCHEDULED": "삭제 예고",
+    "SUSPEND_NOTICE": "급여중지 예고",
+    "STAY_RELEASE_PRICE": "집행정지 종료 후 인하 예고",
+    "DELISTING_NOTICE": "삭제 예고",
 }
 SIGNAL_ORDER = list(SIGNAL_LABEL)
-OUTCOME_LABEL = {"realized": "실현", "realized_partial": "부분 실현 (금액·날짜 다름)", "not_realized": "미실현",
-                 "unverifiable": "판정 불가", "moot": "전제 신호 미실현"}
+OUTCOME_LABEL = {"REALIZED": "실현", "REALIZED_CHANGED": "변경 실현", "REALIZED_LATE": "지연 실현", "REALIZED_BY_DELISTING": "삭제로 실현",
+                 "NOT_REALIZED": "미실현", "EXCLUDED": "판정 제외", "CENSORED": "미결"}
 REASON_LABEL = {
-    "delisted": "확인 스냅샷에 제품 없음", "suspended": "급여정지", "price_kept_stay_note": "가격 그대로 (집행정지 비고 있음)",
-    "unpriced": "산정불가", "price_kept_note_remains": "가격 그대로 (예고 비고 남음)", "note_gone_price_kept": "가격 그대로 (비고 사라짐)",
-    "still_scheduled": "아직 시행 전", "stay_continues": "집행정지 계속", "new_suspension": "새 급여정지", "still_suspended": "정지 계속",
-    "still_listed": "목록에 남음", "recode_transfer": "코드 교체·양도양수",
+    "note_gone": "변화 없이 비고만 사라짐", "stay_ended_not_executed": "집행정지 종료 후 미시행", "stay_then_delisted": "집행정지 중 삭제",
+    "listed_during_suspension": "급여중지 중 예고", "suspended_before_price_date": "인하일 전 급여중지", "target_gone": "대상 소멸",
+    "still_listed": "목록에 남음", "stay_continues": "집행정지 계속", "suspended": "급여중지", "absent": "목록에 없음",
+    "ONGOING_STAY": "집행정지 중", "AWAITING": "관측 기간 부족",
 }
-EVENT_LABEL = {"SUSPEND": "급여정지", "RESUME": "급여정지 복귀", "DELISTING": "목록에서 사라짐", "TRANSFER": "양도양수·코드 교체"}
-DELIST_KIND = {"exit": "삭제", "recode_transfer": "코드 교체·양도양수로 사라짐", "item_remains": "같은 품목의 다른 제품은 남음"}
+EVENT_LABEL = {"SUSPEND": "급여중지", "SUSPEND_LIFT": "중지해제", "DELISTING": "급여삭제", "DELISTING_STAY": "삭제 집행정지",
+               "SUCCESSION": "코드 이어받기 (양도양수·코드 변경·교체 등재)"}
+DELIST_KIND = {"delisting": "급여삭제", "delisting_spec": "급여삭제 (규격, 같은 허가 다른 규격은 남음)",
+               "confirmed_after_stay": "급여삭제 최종 확정 (삭제 집행정지 뒤)", "transfer": "양도양수", "recode": "코드 변경", "swap": "교체 등재",
+               "list_only": "급여목록 표시 사라짐", "list_only_unconfirmed": "급여목록 표시 사라짐 (분석 끝, 미확정)",
+               "period_end": "기간 중지 종료", "r6_note": "급여정지 해제 비고", "delisting_stay": "삭제 집행정지"}
 DATE_SOURCE = {"signal_confirmed": "예고일 (실현 확인)", "note_benefit": "급여목록 비고 날짜", "note_substitute": "대체조제 목록 비고 날짜",
-               "snapshot_first": "그 달 1일 (비고 없음)", "interval": "구간", "gap": "구간"}
+               "snapshot_first": "그 달 1일 (비고 없음)", "interval": "구간", "gap": "구간", "external": "외부 확인 날짜"}
 NOVEMBER_NOTE = ("11월은 미생산·미청구 약제 정기 정비 달(최근 3년 생산·수입 실적이 없고 유효기한이 지난 약제를 매년 1회 삭제). "
                  "근거: 데일리팜 2024-10-21 https://dailypharm.com/user/news/12292 (2024-11-01 1,056개 조정). 이번 해 고시 번호는 미확인.")
 
@@ -108,7 +110,8 @@ def snapshot_months(src: Path | str = DB_PATH) -> list[str]:
 
 
 def build_asof(month: str, src: Path | str = DB_PATH) -> duckdb.DuckDBPyConnection:
-    """MONTH 이하 스냅샷만으로 S2·S3 원장을 다시 만든 메모리 DB. 원본 DB는 src로 붙인다 (읽기 전용)"""
+    """MONTH 이하 스냅샷만으로 S2 속성과 v5 원장(RULES_2026-11-17)을 다시 만든 메모리 DB. 원본 DB는 src로 붙인다 (읽기 전용).
+    v4 원장(S3)은 만들지 않는다 (v4 리포트는 outputs/v4_legacy/reports/에 고정, 2026-11-18)"""
     c = connect(None)
     c.execute(f"attach '{Path(src).as_posix()}' as src (read_only)")
     for t in ("stg_benefit", "stg_substitute", "note_token"):
@@ -116,7 +119,11 @@ def build_asof(month: str, src: Path | str = DB_PATH) -> duckdb.DuckDBPyConnecti
     for t in ("attr_2026_product", "attr_2026_item"):      # 2026 속성표 (속성으로만 쓴다, DATA.md)
         c.execute(f"create table {t} as select * from src.{t}")
     S2.build_all(c)
-    S3.build_all(c)
+    S2.build_attr_month(c)
+    from pbd.ledger import v5_build
+    v5_build.build(c)
+    for t in S2.V4_JUDGMENT_TABLES:            # v4 판정 표는 리포트에서 쓰지 않는다 (RULES §11-4)
+        c.execute(f"drop table if exists {t}")
     return c
 
 
@@ -155,8 +162,8 @@ def _names(con, month: str, drug_info: Path | None = DRUG_INFO) -> None:
     if drug_info is not None and Path(drug_info).exists():
         con.execute(f"""create or replace temp table _mi as
             with x as (select p.ingredient_code, len(string_split(d."주성분", '/')) k
-                       from product_state_month p join read_parquet('{Path(drug_info).as_posix()}') d
-                            on d."품목기준코드" = try_cast(p.item_code as bigint)
+                       from state_month_v5 p join s2_product_link k on k.product_code = p.product_code
+                       join read_parquet('{Path(drug_info).as_posix()}') d on d."품목기준코드" = try_cast(k.item_code as bigint)
                        where p.list_month = ? and d."주성분" is not null)
             select ingredient_code, arg_max(k, (n, k)) k from (select ingredient_code, k, count(*) n from x group by 1, 2) group by 1""",
                     [month])
@@ -174,7 +181,7 @@ def _names(con, month: str, drug_info: Path | None = DRUG_INFO) -> None:
                base_name, n_components, n_source from n""")
     # 성분4 표시 이름: 그 달 제품이 가장 많은 주성분코드(같으면 작은 코드)의 표시 이름. 원본 값 = 그 달 행 이름의 최솟값 (이전 방식)
     con.execute("""create or replace temp table _c4name as
-        with k as (select c4, ingredient_code, count(*) n from product_state_month where list_month = ? group by 1, 2),
+        with k as (select c4, ingredient_code, count(*) n from state_month_v5 where list_month = ? group by 1, 2),
              top as (select c4, arg_min(ingredient_code, (-n, ingredient_code)) ingredient_code from k group by 1),
              raw as (select c4, min(ingredient_name) ingredient_name_raw from (
                         select c4, ingredient_name from stg_benefit where list_month = ? and ingredient_name is not null
@@ -255,15 +262,16 @@ def new_signals(con, month: str) -> pd.DataFrame:
     """이번 달 스냅샷에서 처음 나온 예고 (issued_month = MONTH)"""
     return con.execute("""select l.signal_type, l.signal_id, l.product_code, coalesce(p.product_name, s.product_name) product_name,
                coalesce(p.firm, s.firm) firm, l.market_c4 c4, n.ingredient_name, g.short_name, g.group_key,
-               n.ingredient_name_raw, l.signal_date, l.period_start, l.period_end, l.amount, p.price_listed price_now,
-               case when l.signal_type = 'PRICE_PENDING' and p.price_listed > 0 and l.amount is not null
+               n.ingredient_name_raw, l.signal_date, l.signal_date period_start, l.period_end, l.amount, p.price_listed price_now,
+               case when l.signal_type = 'PRICE_NOTICE' and p.price_listed > 0 and l.amount is not null
                     then round((l.amount / p.price_listed - 1) * 100, 1) end change_pct,
-               array_to_string(l.source_list, '+') source_list, l.raw
-        from signal_ledger l left join product_state_month p on p.product_code = l.product_code and p.list_month = l.issued_month
+               l.source_list, (select string_agg(distinct t.raw, ' ; ') from note_token t where t.product_code = l.product_code
+                                and t.list_month = l.first_month and t.token_date = l.signal_date) raw
+        from signal_v5 l left join state_month_v5 p on p.product_code = l.product_code and p.list_month = l.first_month
         left join (select product_code, min(product_name) product_name, min(firm) firm from stg_substitute where list_month = ?
                    group by 1) s on s.product_code = l.product_code
         left join _c4name n on n.c4 = l.market_c4 left join _c4grp g on g.c4 = l.market_c4
-        where l.issued_month = ? order by l.signal_type, l.market_c4, l.product_code, l.signal_date""", [month, month]).df()
+        where l.first_month = ? and l.source_rule <> 'S_AMT' order by l.signal_type, l.market_c4, l.product_code, l.signal_date""", [month, month]).df()
 
 
 def impact_table(con, month: str) -> pd.DataFrame:
@@ -272,10 +280,11 @@ def impact_table(con, month: str) -> pd.DataFrame:
     impact_pt = impact_listed × 전가율(참고). 이번 달 적용 비율 = (말일 − 예고일 + 1) / 일수. 금액은 억 원/월 (음수 = 감소)"""
     last = pd.Period(month, "M").end_time.normalize()
     df = con.execute("""with s as (select l.market_c4 c4, l.signal_date, l.amount / p.price_listed - 1 r
-                                   from signal_ledger l left join product_state_month p
-                                        on p.product_code = l.product_code and p.list_month = l.issued_month and p.price_listed > 0
-                                   where l.issued_month = ? and l.signal_type = 'PRICE_PENDING'),
-             n as (select c4, count(*) n from product_state_month where list_month = ? and state_asof = 'reimbursed' group by 1)
+                                   from signal_v5 l join state_month_v5 p
+                                        on p.product_code = l.product_code and p.list_month = l.first_month and p.price_listed > 0
+                                   -- 분자도 분모(N)와 같이 급여 상태 제품만 (RULES_2026-11-17 §7)
+                                   where l.first_month = ? and l.signal_type = 'PRICE_NOTICE' and l.source_rule <> 'S_AMT' and p.state = 'reimbursed'),
+             n as (select c4, count(*) n from state_month_v5 where list_month = ? and state = 'reimbursed' group by 1)
         select s.c4, s.signal_date notice_date, any_value(n.n) n_products_c4, count(*) n_noticed, sum(s.r) sum_r,
                avg(s.r) mean_r, median(s.r) median_r, min(s.r) min_r, max(s.r) max_r,
                any_value(b.base_amt) base_amt_won, coalesce(any_value(b.base_months_observed), 0) base_months_observed
@@ -296,14 +305,36 @@ def impact_table(con, month: str) -> pd.DataFrame:
     return out
 
 
+def stay_pending_table(con, month: str) -> pd.DataFrame:
+    """집행정지 중인 처분(미결, RULES_2026-11-17 §6.3·§7): MONTH까지의 스냅샷으로 만든 v5 원장에서 final_outcome = CENSORED,
+    current_status = ONGOING_STAY인 신호. 성분4 × 신호 유형. 잠재 영향(약가 예고만) = 기준 원외 금액 × (1/N) × Σ r_i,
+    r_i = 막힌 처분 금액 / MONTH 상한금액 − 1, N = 성분4 급여 상태 제품 수. 시행 시점을 모르므로 월 단위 잠재 규모로만 쓴다"""
+    df = con.execute("""with s as (select g.signal_type, g.market_c4 c4, g.product_code, g.amount, g.first_month, g.signal_date,
+                                          case when g.signal_type = 'PRICE_NOTICE' and p.price_listed > 0 then g.amount / p.price_listed - 1 end r
+                                   from signal_v5 g left join product_state_month_v5 p on p.product_code = g.product_code and p.list_month = ?
+                                   where g.outcome = 'CENSORED' and g.current_status = 'ONGOING_STAY'),
+             n as (select c4, count(*) n from state_month_v5 where list_month = ? and state = 'reimbursed' group by 1)
+        select s.signal_type, s.c4, count(*) n_signals, count(distinct s.product_code) n_products_pending, min(s.first_month) first_listed_min,
+               max(s.first_month) first_listed_max, any_value(n.n) n_products_c4, sum(s.r) sum_r, median(s.r) median_r,
+               any_value(b.base_amt) base_amt_won, coalesce(any_value(b.base_months_observed), 0) base_months_observed,
+               any_value(g.short_name) short_name
+        from s left join n using (c4) left join _base b using (c4) left join _c4grp g using (c4) group by 1, 2 order by 1, 2""", [month, month]).df()
+    df["potential_impact"] = (df["base_amt_won"] * df["sum_r"] / df["n_products_c4"] / 1e8).round(2)
+    df["median_cut"] = df["median_r"].round(4)                   # 비율 (표시는 _pct)
+    df["base_amt"] = (df["base_amt_won"] / 1e8).round(2)
+    return pd.DataFrame({**refs(month), **{k: df[k] for k in ("signal_type", "c4", "short_name", "n_signals", "n_products_pending", "first_listed_min",
+                                                              "first_listed_max", "n_products_c4", "median_cut", "base_amt",
+                                                              "base_months_observed", "potential_impact")}})
+
+
 def listing_table(con, month: str) -> pd.DataFrame:
     """등재 예고(새 제품) 성분4 × 예고일: 기준 원외 금액, 업체 수 a(MONTH reimbursed) → b(a + 새 업체). 금액 영향은 계산하지 않는다"""
     df = con.execute("""with s as (select l.market_c4 c4, l.signal_date, l.product_code, coalesce(p.firm, x.firm) firm
-                                   from signal_ledger l left join product_state_month p on p.product_code = l.product_code and p.list_month = l.issued_month
+                                   from signal_v5 l left join state_month_v5 p on p.product_code = l.product_code and p.list_month = l.first_month
                                    left join (select product_code, min(firm) firm from stg_substitute where list_month = ? group by 1) x
                                         on x.product_code = l.product_code
-                                   where l.issued_month = ? and l.signal_type = 'LISTING_SCHEDULED'),
-             f as (select distinct c4, firm from product_state_month where list_month = ? and state_asof = 'reimbursed')
+                                   where l.first_month = ? and l.signal_type = 'LISTING_NOTICE'),
+             f as (select distinct c4, firm from state_month_v5 where list_month = ? and state = 'reimbursed')
         select s.c4, s.signal_date notice_date, count(*) n_products, count(distinct s.firm) n_firms_noticed,
                (select count(*) from f where f.c4 = s.c4) firms_now,
                count(distinct s.firm) filter (where not exists (select 1 from f where f.c4 = s.c4 and f.firm = s.firm)) new_firms,
@@ -319,15 +350,15 @@ def listing_table(con, month: str) -> pd.DataFrame:
 def listing_groups(con, month: str) -> pd.DataFrame:
     """F2 2)용: 등재 예고(새 제품)를 성분 묶음(group_key)으로 모은 값. 업체 수는 묶음 안에서 중복 없이 센다"""
     return con.execute("""with s as (select g.group_key gk, l.signal_date, coalesce(p.firm, x.firm) firm
-                                   from signal_ledger l join _c4grp g on g.c4 = l.market_c4
-                                   left join product_state_month p on p.product_code = l.product_code and p.list_month = l.issued_month
+                                   from signal_v5 l join _c4grp g on g.c4 = l.market_c4
+                                   left join state_month_v5 p on p.product_code = l.product_code and p.list_month = l.first_month
                                    left join (select product_code, min(firm) firm from stg_substitute where list_month = ? group by 1) x
                                         on x.product_code = l.product_code
-                                   where l.issued_month = ? and l.signal_type = 'LISTING_SCHEDULED'),
-             f as (select distinct g.group_key gk, p.firm from product_state_month p join _c4grp g using (c4)
-                   where p.list_month = ? and p.state_asof = 'reimbursed'),
+                                   where l.first_month = ? and l.signal_type = 'LISTING_NOTICE'),
+             f as (select distinct g.group_key gk, p.firm from state_month_v5 p join _c4grp g using (c4)
+                   where p.list_month = ? and p.state = 'reimbursed'),
              bs as (select g.group_key gk, sum(b.base_amt) base_amt from _c4grp g join _base b using (c4)
-                    where g.c4 in (select market_c4 from signal_ledger where issued_month = ? and signal_type = 'LISTING_SCHEDULED') group by 1)
+                    where g.c4 in (select market_c4 from signal_v5 where first_month = ? and signal_type = 'LISTING_NOTICE') group by 1)
         select s.gk, min(s.signal_date) notice_date, count(distinct s.firm) firms_noticed,
                (select count(*) from f where f.gk = s.gk) firms_now,
                count(distinct s.firm) filter (where not exists (select 1 from f where f.gk = s.gk and f.firm = s.firm)) new_firms,
@@ -336,18 +367,20 @@ def listing_groups(con, month: str) -> pd.DataFrame:
 
 
 def realization_rates(con, month: str) -> pd.DataFrame:
-    """MONTH 시점까지 결과가 난 신호의 유형별 실현율 (실현 = realized + realized_partial, A1과 같은 정의, Wilson 95%)"""
-    df = con.execute("""select signal_type, outcome, count(*) n from signal_outcome where issued_month <= ? group by 1, 2""",
-                     [month]).df()
+    """MONTH as-of 원장의 신호 유형별 지표 (RULES §7): B 최종 실현율(주) = 실현 계열 ÷ (전체 − 판정 제외 − 미결),
+    A 현재 시점 집행률 = 실현 계열 ÷ (전체 − 판정 제외 − 미결 AWAITING), Wilson 95%"""
+    from pbd.ledger.v5_rules import rates as v5_rates
+    df = con.execute("""select signal_type, outcome, reason, stay_blocked, current_status from signal_v5 where first_month <= ?""", [month]).df()
     rows = []
     for t in SIGNAL_ORDER:
-        g = df[df["signal_type"] == t].set_index("outcome")["n"]
-        r, p, nr = (int(g.get(k, 0)) for k in ("realized", "realized_partial", "not_realized"))
-        d = r + p + nr
-        lo, hi = wilson(r + p, d)
-        rows.append({"signal_type": t, "label": SIGNAL_LABEL[t], "decided": d, "realized": r, "realized_partial": p,
-                     "not_realized": nr, "rate": round((r + p) / d, 4) if d else None, "rate_lo": lo, "rate_hi": hi,
-                     "censored": int(g.get("censored", 0)), "unverifiable": int(g.get("unverifiable", 0)), "moot": int(g.get("moot", 0))})
+        g = df[df["signal_type"] == t]
+        x = v5_rates(g.to_dict("records"))
+        bk, bn, bp, blo, bhi = x["B"]
+        ak, an, ap, alo, ahi = x["A"]
+        r4 = lambda v: None if v is None else round(v, 4)
+        rows.append({"signal_type": t, "label": SIGNAL_LABEL[t], "decided": bn, "realized": bk, "rate": r4(bp), "rate_lo": r4(blo),
+                     "rate_hi": r4(bhi), "rate_a": r4(ap), "rate_a_lo": r4(alo), "rate_a_hi": r4(ahi), "a_denominator": an,
+                     "censored": x["n_censored"], "ongoing_stay": x["n_ongoing_stay"], "excluded": x["n_excluded"]})
     return pd.DataFrame(rows)
 
 
@@ -362,34 +395,37 @@ def wilson(k: int, n: int, z: float = 1.959963984540054) -> tuple[float | None, 
 
 
 def _outcome_state(con) -> pd.DataFrame:
-    return con.execute("select signal_id, outcome from signal_outcome").df()
+    return con.execute("select signal_id, outcome from signal_v5").df()
 
 
 def outcomes_this_month(con, prev: pd.DataFrame | None, month: str) -> pd.DataFrame:
     """이번 달 스냅샷으로 결과가 난 신호: MONTH as-of에서 censored가 아니고, 직전 스냅샷 달 as-of에서는 censored(또는 없음)"""
-    cur = con.execute("""select o.signal_type, o.signal_id, o.product_code, p.product_name, p.firm, l.market_c4 c4, n.ingredient_name,
-               o.issued_month, o.signal_date, l.amount, p.price_listed price_now, o.outcome, o.reason, o.reason_source, o.evidence
-        from signal_outcome o join signal_ledger l using (signal_id)
-        left join product_state_month p on p.product_code = o.product_code and p.list_month = ?
-        left join _c4name n on n.c4 = l.market_c4
-        where o.outcome <> 'censored' order by o.signal_type, l.market_c4, o.product_code, o.signal_date""", [month]).df()
+    cur = con.execute("""select o.signal_type, o.signal_id, o.product_code, p.product_name, p.firm, o.market_c4 c4, n.ingredient_name,
+               o.first_month issued_month, o.signal_date, o.amount, p.price_listed price_now, o.outcome, coalesce(o.reason, o.current_status) reason,
+               o.reason_external, o.stay_blocked,
+               concat_ws(' · ', o.exclude_reason, case when o.effective_date is not null then '유효일 ' || cast(o.effective_date as varchar) end,
+                         case when o.stay_blocked then '집행정지로 막혔던 처분' end) evidence
+        from signal_v5 o
+        left join state_month_v5 p on p.product_code = o.product_code and p.list_month = ?
+        left join _c4name n on n.c4 = o.market_c4
+        where o.outcome <> 'CENSORED' order by o.signal_type, o.market_c4, o.product_code, o.signal_date""", [month]).df()
     if prev is None:
         return cur.iloc[0:0]
     before = prev.set_index("signal_id")["outcome"]
     was = cur["signal_id"].map(before)
-    return cur[was.isna() | (was == "censored")].reset_index(drop=True)
+    return cur[was.isna() | (was == "CENSORED")].reset_index(drop=True)
 
 
 def remaining_counts(con, month: str) -> None:
     """F4: 이번 달 이벤트 제품마다 MONTH 스냅샷의 같은 주성분코드(9자리)·같은 성분4 reimbursed 제품 수 (자기 제외).
     MONTH 행만 쓴다. 제품의 주성분코드는 MONTH 행, 없으면(사라진 제품) 직전 스냅샷 행. _rem(product_code, ingredient_code, ...)"""
     con.execute("""create or replace temp table _rem as
-        with ev as (select e.product_code, min(e.market_c4) c4 from event_ledger e where e.observed_month = ? group by 1),
-             k as (select prev_month from s3_cal where list_month = ?),
+        with ev as (select e.product_code, min(e.market_c4) c4 from ev_v5 e where e.observed_month = ? group by 1),
+             k as (select prev_month from cal_v5 where list_month = ?),
              code as (select ev.product_code, ev.c4, coalesce(p1.ingredient_code, p0.ingredient_code) ingredient_code
-                      from ev left join product_state_month p1 on p1.product_code = ev.product_code and p1.list_month = ?
-                      left join product_state_month p0 on p0.product_code = ev.product_code and p0.list_month = (select prev_month from k)),
-             cur as (select product_code, ingredient_code, c4 from product_state_month where list_month = ? and state_asof = 'reimbursed')
+                      from ev left join state_month_v5 p1 on p1.product_code = ev.product_code and p1.list_month = ?
+                      left join state_month_v5 p0 on p0.product_code = ev.product_code and p0.list_month = (select prev_month from k)),
+             cur as (select product_code, ingredient_code, c4 from state_month_v5 where list_month = ? and state = 'reimbursed')
         select code.product_code, code.ingredient_code,
                (select count(*) from cur where cur.ingredient_code = code.ingredient_code and cur.product_code <> code.product_code) same_code_remaining,
                (select count(*) from cur where cur.c4 = code.c4 and cur.product_code <> code.product_code) same_c4_remaining
@@ -401,17 +437,17 @@ def events_this_month(con, month: str) -> pd.DataFrame:
     # 제품명·업체: 이번 달 행, 없으면(사라진 제품) 직전 스냅샷 행
     df = con.execute("""select e.event_type, e.kind, e.product_code, coalesce(p1.product_name, p0.product_name) product_name,
                coalesce(p1.firm, p0.firm) firm, e.market_c4 c4, r.ingredient_code, n.ingredient_name, g.short_name, g.group_key,
-               e.effective_date, e.effective_date_lo, e.effective_date_hi, e.date_source, e.evidence,
+               e.effective_date, e.effective_lo effective_date_lo, e.effective_hi effective_date_hi, e.date_source, e.evidence,
                r.same_code_remaining, r.same_c4_remaining, round(b.base_amt / 1e8, 2) base_amt, nc.n n_products_c4,
                -- 제품 1개 몫 (근사) = 성분4 원외 금액 / 성분4 reimbursed 제품 수 (F1과 같은 제품 수 비중 근사)
                round(b.base_amt / nullif(nc.n, 0) / 1e8, 3) product_share,
                -- 이름 보조: 제품 자신의 주성분코드 표시 이름 (성분4 제품이 이번 달에 하나도 남지 않은 경우)
                ig.base_name ing_base_name, ig.n_components ing_n_components
-        from event_ledger e join s3_cal k on k.list_month = e.observed_month
-        left join (select c4, count(*) n from product_state_month where list_month = ? and state_asof = 'reimbursed' group by 1) nc
+        from ev_v5 e join cal_v5 k on k.list_month = e.observed_month
+        left join (select c4, count(*) n from state_month_v5 where list_month = ? and state = 'reimbursed' group by 1) nc
                on nc.c4 = e.market_c4
-        left join product_state_month p1 on p1.product_code = e.product_code and p1.list_month = e.observed_month
-        left join product_state_month p0 on p0.product_code = e.product_code and p0.list_month = k.prev_month
+        left join state_month_v5 p1 on p1.product_code = e.product_code and p1.list_month = e.observed_month
+        left join state_month_v5 p0 on p0.product_code = e.product_code and p0.list_month = k.prev_month
         left join _c4name n on n.c4 = e.market_c4 left join _c4grp g on g.c4 = e.market_c4
         left join _rem r on r.product_code = e.product_code left join _base b on b.c4 = e.market_c4
         left join _ingname ig on ig.ingredient_code = r.ingredient_code
@@ -422,11 +458,11 @@ def events_this_month(con, month: str) -> pd.DataFrame:
 def price_changes(con, month: str) -> pd.DataFrame:
     """이번 달 관측된 상한금액 변경 (직전 스냅샷 → 이번 스냅샷), 성분4별"""
     return con.execute("""with e as (select e.product_code, e.market_c4 c4, e.kind, e.effective_date, e.date_source
-                                  from event_ledger e where e.event_type = 'PRICE_CHANGE' and e.observed_month = ?),
+                                  from ev_v5 e where e.event_type = 'PRICE_CHANGE' and e.observed_month = ?),
              pp as (select e.*, a.price_listed p0, b.price_listed p1 from e
-                    join s3_cal k on k.list_month = ?
-                    join product_state_month b on b.product_code = e.product_code and b.list_month = ?
-                    join product_state_month a on a.product_code = e.product_code and a.list_month = k.prev_month)
+                    join cal_v5 k on k.list_month = ?
+                    join state_month_v5 b on b.product_code = e.product_code and b.list_month = ?
+                    join state_month_v5 a on a.product_code = e.product_code and a.list_month = k.prev_month)
         select pp.c4, n.ingredient_name, g.short_name, g.group_key, n.ingredient_name_raw, count(*) n_products,
                count(*) filter (where p1 < p0) n_cut, count(*) filter (where p1 > p0) n_raise,
                round(median(case when p1 < p0 then (p1 / p0 - 1) * 100 end), 1) median_cut_pct,
@@ -440,7 +476,7 @@ def subst_rank(con, month: str) -> pd.DataFrame:
     성분4 원외가 12개월 창(MONTH−16 ~ MONTH−5) 모두 관측. 순서: 12개월 원외 금액. 가장 가격 차가 큰 그룹 = 최고/최저 비율 최대 (같으면 제품 수)"""
     win = usage_window(month)
     return con.execute("""with p as (select sub_group_code grp, ingredient_code, c4, product_code, price_listed price
-                                    from product_state_month where list_month = ? and in_substitute_list and state_asof = 'reimbursed'
+                                    from state_month_v5 where list_month = ? and in_substitute_list and state = 'reimbursed'
                                     and price_listed > 0),
              g as (select grp, ingredient_code, min(c4) c4, count(*) n_products, min(price) min_price, max(price) max_price,
                           round(max(price) / min(price), 3) ratio from p group by 1, 2 having count(*) >= 2),
@@ -460,9 +496,9 @@ def subst_rank(con, month: str) -> pd.DataFrame:
 
 
 def delisting_history(con, month: str) -> pd.DataFrame:
-    """MONTH 전 달들의 삭제(DELISTING exit) 건수 (as-of 원장, 이번 달 비교용)"""
+    """MONTH 전 달들의 급여삭제(DELISTING delisting) 건수 (as-of 원장, 이번 달 비교용)"""
     return con.execute("""select k.list_month as month, count(e.event_id) n_exit
-        from s3_cal k left join event_ledger e on e.observed_month = k.list_month and e.event_type = 'DELISTING' and e.kind = 'exit'
+        from cal_v5 k left join ev_v5 e on e.observed_month = k.list_month and e.event_type = 'DELISTING' and e.kind = 'delisting'
         where k.list_month < ? and k.prev_month is not null group by 1 order by 1""", [month]).df()
 
 
@@ -473,9 +509,9 @@ def attention(sig: pd.DataFrame, imp: pd.DataFrame, lstg: pd.DataFrame, ev: pd.D
     grp: c4 → group_key 표"""
     g = dict(zip(grp["c4"], grp["group_key"]))
     lines: list[str] = []
-    rate_pp = rates.set_index("signal_type").loc["PRICE_PENDING", "rate"]
+    rate_pp = rates.set_index("signal_type").loc["PRICE_NOTICE", "rate"]
     # 1) 가격 인하 예고: 점수 = 과거 실현율 × |Σ impact_listed| (묶음 합산)
-    p = sig[sig["signal_type"] == "PRICE_PENDING"].assign(gk=lambda d: d["c4"].map(g))
+    p = sig[sig["signal_type"] == "PRICE_NOTICE"].assign(gk=lambda d: d["c4"].map(g))
     if len(p) and len(imp):
         im = imp.assign(gk=imp["c4"].map(g)).groupby("gk").agg(impact=("impact_listed", lambda s: s.sum(min_count=1))).reset_index()
         a = p.groupby("gk").agg(n=("product_code", "size"), date=("signal_date", "min"), med=("change_pct", "median")).reset_index()
@@ -486,7 +522,7 @@ def attention(sig: pd.DataFrame, imp: pd.DataFrame, lstg: pd.DataFrame, ev: pd.D
         if len(a):
             r = a.iloc[0]
             lines.append(f"**가격 인하 예고** — {labels.get(r.gk, r.gk)} {int(r.n):,}개 제품 {_d(r.date)}부터 상한금액 중앙 {r.med:.1f}% 인하 예고 "
-                         f"(과거 실현율 {_pct(rate_pp)}, 월 영향 " + ("0.1억 원 미만" if abs(r.impact) < 0.05 else f"약 {r.impact:,.1f}억 원") + ").")
+                         f"(과거 최종 실현율 {_pct(rate_pp)}, 월 영향 " + ("0.1억 원 미만" if abs(r.impact) < 0.05 else f"약 {r.impact:,.1f}억 원") + ").")
     # 2) 등재 예고: 새 업체 수가 가장 많은 묶음 (동점이면 base_amt 큰 쪽, 그다음 group_key)
     if len(lstg):
         a = lstg.sort_values(["new_firms", "base_amt", "gk"], ascending=[False, False, True], na_position="last")
@@ -496,7 +532,7 @@ def attention(sig: pd.DataFrame, imp: pd.DataFrame, lstg: pd.DataFrame, ev: pd.D
                          f"(업체 수 {int(r.firms_now):,} → {int(r.firms_now + r.new_firms):,}).")
     # 3) 삭제·정지: 같은 주성분코드에 남은 reimbursed 제품이 0인 삭제(exit)·정지의 건수가 가장 많은 묶음.
     #    같으면 그 제품들의 제품 몫(근사) 합이 큰 쪽, 그다음 묶음 이름 순. 그런 제품이 없으면 줄을 쓰지 않는다
-    d = ev[((ev["event_type"] == "DELISTING") & (ev["kind"] == "exit")) | (ev["event_type"] == "SUSPEND")]
+    d = ev[((ev["event_type"] == "DELISTING") & (ev["kind"] == "delisting")) | (ev["event_type"] == "SUSPEND")]
     if len(d):
         d = d.assign(gk=d["c4"].map(g).fillna("c4:" + d["c4"].fillna("")), none=d["same_code_remaining"] == 0)
         nd = d[d["none"]]
@@ -506,7 +542,7 @@ def attention(sig: pd.DataFrame, imp: pd.DataFrame, lstg: pd.DataFrame, ev: pd.D
             a = a.assign(_s=a["share"].fillna(-1)).sort_values(["k", "_s", "gk"], ascending=[False, False, True])
             r = a.iloc[0]
             kinds = set(d.loc[d["gk"] == r.gk, "event_type"])
-            what = "삭제/정지" if kinds == {"DELISTING", "SUSPEND"} else ("정지" if kinds == {"SUSPEND"} else "삭제")
+            what = "삭제/급여중지" if kinds == {"DELISTING", "SUSPEND"} else ("급여중지" if kinds == {"SUSPEND"} else "삭제")
             share = "자료 없음" if pd.isna(r.share) else ("0.1억 원/월 미만" if abs(r.share) < 0.05 else f"약 {r.share:,.1f}억 원/월")
             lines.append(f"**삭제·정지** — {labels.get(r.gk, r.gk)} {int(r.n):,}개 제품 {what}, 그중 같은 함량·제형 대체 제품이 없는 것 "
                          f"{int(r.k):,}개 (제품 몫 합 {share}).")
@@ -514,10 +550,10 @@ def attention(sig: pd.DataFrame, imp: pd.DataFrame, lstg: pd.DataFrame, ev: pd.D
 
 
 ATTENTION_RULES = [
-    "가격 인하 예고: 점수 = 가격 변경 예고의 과거 실현율 × |상한금액 기준 월 영향|. 같은 성분 묶음(염·수화물만 다른 성분4)으로 합산해 가장 큰 묶음 1개. "
+    "가격 인하 예고: 점수 = 약가 예고의 과거 최종 실현율 × |상한금액 기준 월 영향|. 같은 성분 묶음(염·수화물만 다른 성분4)으로 합산해 가장 큰 묶음 1개. "
     "같으면 예고 제품 수가 많은 쪽, 그다음 묶음 이름 순. 월 영향을 계산할 수 없는(사용통계 미관측) 묶음은 뽑지 않는다.",
     "등재 예고: 새 업체 수(이번 달 reimbursed 업체에 없던 업체)가 가장 많은 묶음 1개. 같으면 기준 원외 금액이 큰 쪽, 그다음 묶음 이름 순.",
-    "삭제·정지: 이번 달 삭제(exit)·정지 중 같은 주성분코드(성분·함량·제형)에 남은 reimbursed 제품이 0인 것의 건수가 가장 많은 묶음 1개. "
+    "삭제·정지: 이번 달 급여삭제·급여중지 중 같은 주성분코드(성분·함량·제형)에 남은 reimbursed 제품이 0인 것의 건수가 가장 많은 묶음 1개. "
     "같으면 그 제품들의 제품 몫 합(근사: 성분4 원외 금액 ÷ 성분4 reimbursed 제품 수)이 큰 쪽, 그다음 묶음 이름 순. 그런 제품이 없으면 쓰지 않는다. "
     "삭제·정지 줄은 건수 기준이라 금액이 작은 묶음이 뽑힐 수 있다.",
 ]
@@ -566,7 +602,8 @@ def _rate_text(rates: pd.DataFrame, t: str) -> str:
     r = rates.set_index("signal_type").loc[t]
     if not r["decided"]:
         return "과거 결과 없음"
-    return f"{_pct(r['rate'])} ({int(r['realized'] + r['realized_partial']):,}/{int(r['decided']):,})"
+    a = f", 현재 시점 집행률 {_pct(r['rate_a'])}" if r["rate_a"] is not None and r["rate_a"] != r["rate"] else ""
+    return f"최종 실현율 {_pct(r['rate'])} ({int(r['realized']):,}/{int(r['decided']):,}){a}"
 
 
 def _ym_kor(month: str) -> str:
@@ -600,19 +637,23 @@ def render(month: str, src: Path | str = DB_PATH) -> tuple[str, dict[str, pd.Dat
         lstg = listing_groups(con, month)
         grp = con.execute("select c4, short_name, group_key, is_complex from _c4grp order by c4").df()
         labels = group_label(con)
-        n_products = con.execute("select count(*) from product_state_month where list_month = ?", [month]).fetchone()[0]
+        n_products = con.execute("select count(*) from state_month_v5 where list_month = ?", [month]).fetchone()[0]
         dl = delisting_history(con, month)
+        stp = stay_pending_table(con, month)
+        # 이번 달 새로 기록된 막힌 인하 처분 (§1 대체조제 금액 신호): §2에 한 줄, 내용은 §3a
+        samt = con.execute("""select count(*), count(distinct market_c4) from signal_v5
+                              where first_month = ? and source_rule = 'S_AMT'""", [month]).fetchone()
     finally:
         con.close()
     att = attention(sig, imp, lstg, ev, rates, grp, labels)
-    md = _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, imp, lst, att, grp, labels)
+    md = _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, imp, lst, att, grp, labels, stp, samt)
     r = refs(month)
     win = usage_window(month)
     no_usage = {**r, "usage_ref_from": None, "usage_ref_to": None}
     tabs = {"new_signals": sig.assign(**no_usage), "signal_rates": rates.assign(**no_usage),
             "signal_results": outc.assign(**no_usage), "events": ev.assign(**r),
             "price_changes": pc.assign(**no_usage), "subst_rank_c4": cr.assign(**{**r, "usage_ref_from": win[0], "usage_ref_to": win[-1]}),
-            "impact": imp.drop(columns=["base_amt_won", "sum_r"]), "listing": lst,
+            "impact": imp.drop(columns=["base_amt_won", "sum_r"]), "listing": lst, "stay_pending": stp,
             "attention": pd.DataFrame({**r, "line": list(range(1, len(att) + 1)), "text": att})}
     return md, tabs
 
@@ -623,7 +664,7 @@ def render_no_data(month: str, months: list[str]) -> str:
                       f"- 스냅샷이 있는 달: {rng} ({len(months)}개)", ""])
 
 
-def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, imp, lst, att, grp, labels) -> str:
+def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, imp, lst, att, grp, labels, stp=None, samt=(0, 0)) -> str:
     b = base_window(month)
     win = usage_window(month)
     ub = f"(사용통계 기준 {b[0]} ~ {b[-1]})"
@@ -636,7 +677,7 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
     sn = dict(zip(grp["c4"], grp["short_name"]))
     cnt = sig["signal_type"].value_counts()
     ev_cnt = ev["event_type"].value_counts()
-    n_del = int(((ev["event_type"] == "DELISTING") & (ev["kind"] == "exit")).sum())
+    n_del = int(((ev["event_type"] == "DELISTING") & (ev["kind"] == "delisting")).sum())
 
     # 주목할 것
     L += ["## 이번 달 주목할 것", ""]
@@ -656,32 +697,40 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
                  + (f". 인하 제품이 많은 성분: {tops}." if tops else "."))
     else:
         L.append("- 상한금액이 바뀐 제품 없음.")
-    L.append(f"- 급여정지 {int(ev_cnt.get('SUSPEND', 0)):,}건, 정지 복귀 {int(ev_cnt.get('RESUME', 0)):,}건, 삭제 {n_del:,}건, "
-             f"양도양수·코드 교체 {int(ev_cnt.get('TRANSFER', 0)):,}건.")
+    L.append(f"- 급여중지 {int(ev_cnt.get('SUSPEND', 0)):,}건, 중지해제 {int(ev_cnt.get('SUSPEND_LIFT', 0)):,}건, 급여삭제 {n_del:,}건, "
+             f"코드 이어받기 {int(ev_cnt.get('SUCCESSION', 0)):,}건.")
     if prev_month:
         oc = outc["outcome"].value_counts()
-        L.append(f"- 지난 예고 중 이번 스냅샷으로 결과가 난 것 {len(outc):,}건: 실현 {int(oc.get('realized', 0)):,}, "
-                 f"부분 실현 {int(oc.get('realized_partial', 0)):,}, 미실현 {int(oc.get('not_realized', 0)):,}.")
+        L.append(f"- 지난 예고 중 이번 스냅샷으로 결과가 난 것 {len(outc):,}건: "
+                 + ", ".join(f"{OUTCOME_LABEL[k]} {int(oc.get(k, 0)):,}" for k in OUTCOME_LABEL if k != "CENSORED") + ".")
     L.append("")
 
     # 2. 새 예고
     L += [f"## 2. 이번 달 새 예고 {ub}", "",
-          f"과거 실현율 = {month} 스냅샷까지 결과가 난 같은 유형 예고의 (실현 + 부분 실현) / (실현 + 부분 실현 + 미실현). "
-          "아직 확인 스냅샷이 오지 않은 예고, 판정 불가, 전제 신호 미실현은 분모에서 뺀다.", ""]
+          f"과거 실현율 (RULES §7, {month} 스냅샷까지): 최종 실현율 B = 실현 계열(실현·변경 실현·지연 실현·삭제로 실현) ÷ (전체 − 판정 제외 − 미결). "
+          "현재 시점 집행률 A = 실현 계열 ÷ (전체 − 판정 제외 − 관측 기간 부족) (집행정지 중인 처분은 미실현으로 셈). A와 B의 차이는 집행정지로 아직 막힌 몫이다.", ""]
     rows = []
     for t in SIGNAL_ORDER:
         r = rates.set_index("signal_type").loc[t]
         rows.append([SIGNAL_LABEL[t], _f(int(cnt.get(t, 0))), _pct(r["rate"]) if r["decided"] else "",
                      f"{_pct(r['rate_lo'])} ~ {_pct(r['rate_hi'])}" if r["decided"] else "", _f(int(r["decided"])),
-                     _f(int(r["censored"]))])
-    L += _table(["유형", "이번 달 새 예고", "과거 실현율", "95% 구간", "분모 (결과 난 예고)", "결과 대기"], rows) + [""]
+                     _pct(r["rate_a"]) if r["a_denominator"] else "",
+                     f"{_pct(r['rate_a_lo'])} ~ {_pct(r['rate_a_hi'])}" if r["a_denominator"] else "",
+                     _f(int(r["ongoing_stay"])), _f(int(r["censored"] - r["ongoing_stay"])), _f(int(r["excluded"]))])
+    L += _table(["유형", "이번 달 새 예고", "최종 실현율 B", "B 95% 구간", "B 분모", "현재 시점 집행률 A", "A 95% 구간",
+                 "미결 (집행정지 중)", "미결 (관측 기간 부족)", "판정 제외"], rows) + [""]
+    L += [f"과거 실현율은 {month} 스냅샷까지 결과가 난 예고만 센다. 미결이던 예고의 결과가 새로 나면(시행·미실현·집행정지 중 삭제 등) "
+          "분모와 분자가 바뀌어, 같은 유형이라도 리포트 달마다 B와 A가 달라진다.", ""]
+    if samt and samt[0]:
+        L += [f"- 이번 달 새로 기록된 막힌 인하 처분 (대체조제 목록 금액, 급여목록에 새 집행정지) {int(samt[0]):,}건 · 성분4 {int(samt[1]):,}개: "
+              "최초 기재 때부터 집행정지로 시행되지 않아 새 예고 표·영향 규모에서는 빼고 §3a에 적는다.", ""]
     for t in SIGNAL_ORDER:
         gs = sig[sig["signal_type"] == t]
         if gs.empty:
             continue
         rt = _rate_text(rates, t)
-        L += [f"### {SIGNAL_LABEL[t]} {len(gs):,}건 (" + (f"과거 실현율 {rt})" if rt != "과거 결과 없음" else "같은 유형의 과거 결과 없음)"), ""]
-        if t == "PRICE_PENDING":
+        L += [f"### {SIGNAL_LABEL[t]} {len(gs):,}건 (" + (f"과거 {rt})" if rt != "과거 결과 없음" else "같은 유형의 과거 결과 없음)"), ""]
+        if t == "PRICE_NOTICE":
             a = gs.groupby(["c4", "signal_date"], dropna=False).agg(
                 name=("ingredient_name", "first"), n=("product_code", "size"),
                 med=("change_pct", "median"), lo=("change_pct", "min"), hi=("change_pct", "max")).reset_index()
@@ -700,7 +749,7 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
                          for r in a.head(LIST_ROWS).itertuples()])
             if len(a) > LIST_ROWS:
                 L.append(f"\n외 성분4 {len(a) - LIST_ROWS:,}개 (`impact.csv`, `new_signals.csv`).")
-        elif t == "LISTING_SCHEDULED":
+        elif t == "LISTING_NOTICE":
             s2 = lst.sort_values(["new_firms", "n_products", "c4"], ascending=[False, False, True])
             L += _table(["성분4", "성분", "묶음", "예고 날짜", "제품", "새 업체", "업체 수 (지금 → 등재 후)", "기준 원외 금액 (억/월)"],
                         [[r.c4, _name(gs.loc[gs["c4"] == r.c4, "ingredient_name"].iloc[0]), sn.get(r.c4, ""), r.notice_date,
@@ -734,23 +783,41 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
             if t not in tab.index:
                 continue
             r = tab.loc[t]
-            rows.append([SIGNAL_LABEL[t]] + [_f(int(r.get(k, 0))) for k in ("realized", "realized_partial", "not_realized")]
-                        + [_f(int(r.get("unverifiable", 0)) + int(r.get("moot", 0))), _f(int(r.sum()))])
-        L += _table(["유형", "실현", "부분 실현", "미실현", "판정 불가·전제 미실현", "합"], rows) + [""]
-        nr = outc[outc["outcome"] != "realized"]
+            rows.append([SIGNAL_LABEL[t]] + [_f(int(r.get(k, 0))) for k in OUTCOME_LABEL if k != "CENSORED"] + [_f(int(r.sum()))])
+        L += _table(["유형"] + [OUTCOME_LABEL[k] for k in OUTCOME_LABEL if k != "CENSORED"] + ["합"], rows) + [""]
+        nr = outc[outc["outcome"] != "REALIZED"]
         if len(nr):
             L += ["**실현되지 않았거나 다르게 실현된 예고**", ""]
             L += _table(["유형", "결과", "사유", "제품코드", "제품명", "성분4", "예고 날짜", "근거"],
                         [[SIGNAL_LABEL[r.signal_type], OUTCOME_LABEL.get(r.outcome, r.outcome),
-                          REASON_LABEL.get(r.reason, r.reason or "") + (" (외부 자료)" if r.reason_source in ("external", "data+external") else ""),
+                          REASON_LABEL.get(r.reason, r.reason or "") + (" (외부 자료)" if isinstance(r.reason_external, str) and r.reason_external else ""),
                           r.product_code, _name(r.product_name), r.c4 or "", _d(r.signal_date), _name(r.evidence)]
                          for r in nr.head(LIST_ROWS).itertuples()])
             if len(nr) > LIST_ROWS:
                 L.append(f"\n외 {len(nr) - LIST_ROWS:,}건 (`signal_results.csv`).")
             L.append("")
 
+    # 3a. 집행정지 중인 처분 (미결)과 잠재 영향 규모 (RULES_2026-11-17 §7)
+    L += [f"## 3a. 집행정지 중인 처분 (미결)과 잠재 영향 규모 {ub}", ""]
+    if stp is None or stp.empty:
+        L += ["이번 스냅샷 기준 집행정지로 시행되지 않고 있는 처분은 없다.", ""]
+    else:
+        tot = stp.groupby("signal_type")["n_signals"].sum()
+        L += ["예정일이 지났지만 법원 집행정지로 아직 시행되지 않은 처분이다 (v5 원장 `CENSORED` · `ONGOING_STAY`). "
+              "언제 시행될지는 알 수 없어, 잠재 영향은 지금 시행된다고 할 때의 월 규모(억 원, 음수 = 감소)로만 적는다. "
+              "급여중지 처분은 금액 영향을 계산하지 않는다.", "",
+              "- " + ", ".join(f"{SIGNAL_LABEL.get(t, t)} {_f(int(v))}건" for t, v in tot.items()), ""]
+        top = stp.assign(a=stp["potential_impact"].abs()).sort_values(["a", "n_signals"], ascending=[False, False], na_position="last")
+        L += _table(["유형", "성분4", "이름", "처분 수", "최초 기재", "중앙 인하율", "기준 원외 금액", "잠재 영향"],
+                    [[SIGNAL_LABEL.get(r.signal_type, r.signal_type), r.c4 or "", _name(r.short_name), _f(r.n_signals),
+                      f"{r.first_listed_min}~{r.first_listed_max}" if r.first_listed_min != r.first_listed_max else r.first_listed_min,
+                      _pct(r.median_cut), _amt(r.base_amt), _amt(r.potential_impact)] for r in top.head(LIST_ROWS).itertuples()])
+        if len(stp) > LIST_ROWS:
+            L.append(f"\n외 {len(stp) - LIST_ROWS:,}행 (`stay_pending.csv`).")
+        L.append("")
+
     # 4. 정지·복귀, 삭제, 양도양수 (F4)
-    L += [f"## 4. 급여정지·복귀, 삭제, 양도양수·코드 교체 {ub}", ""]
+    L += [f"## 4. 급여중지·중지해제, 급여삭제, 코드 이어받기 {ub}", ""]
     sub = ev[ev["event_type"].isin(list(EVENT_LABEL))]
     if sub.empty:
         L += ["이번 스냅샷에서 관측된 것 없음.", ""]
@@ -761,7 +828,7 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
         if t == "DELISTING":
             kinds = ", ".join(f"{DELIST_KIND.get(k, k)} {n:,}" for k, n in gt["kind"].value_counts().sort_index().items())
             L += [f"### {EVENT_LABEL[t]} {len(gt):,}건 ({kinds})", ""]
-            ex = gt[gt["kind"] == "exit"]
+            ex = gt[gt["kind"] == "delisting"]
             k_none = int((ex["same_code_remaining"] == 0).sum())
             L.append(f"**같은 함량·제형 대체 제품 없는 삭제 {k_none:,}건** (같은 주성분코드 = 성분·함량·제형이 같은 reimbursed 제품이 {month} 목록에 남지 않음).")
             if len(ex):
@@ -795,7 +862,7 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
         L += _table(["제품코드", "제품명", "업체", "성분4", "구분", "유효일", "유효일 근거", "같은 주성분코드 남은 제품", "같은 성분4 남은 제품",
                      "성분4 전체 원외 금액 (억/월)", "제품 1개 몫 (근사, 억/월)"],
                     [[r.product_code, _name(r.product_name), _name(r.firm), r.c4 or "",
-                      DELIST_KIND.get(r.kind, r.kind) if t == "DELISTING" else (r.kind or ""),
+                      DELIST_KIND.get(r.kind, r.kind or ""),
                       _d(r.effective_date) or f"{_d(r.effective_date_lo)} ~ {_d(r.effective_date_hi)}",
                       DATE_SOURCE.get(r.date_source, r.date_source or ""), _f(r.same_code_remaining), _f(r.same_c4_remaining),
                       _amt(r.base_amt), _small(r.product_share, 2)]
@@ -826,8 +893,8 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
 
     # 읽는 법
     L += ["## 이 리포트를 읽는 법", "",
-          "- Q1 이번 달 무엇이 바뀌나: §2 새 예고, §4 이번 스냅샷에서 관측된 정지·삭제·양도양수 (목록 ≤ 발간월).",
-          "- Q2 믿어도 되나: 같은 유형 예고의 과거 실현율 (발간월 시점 원장에서 결과가 난 예고만).",
+          "- Q1 이번 달 무엇이 바뀌나: §2 새 예고, §4 이번 스냅샷에서 관측된 급여중지·중지해제·급여삭제·코드 이어받기 (목록 ≤ 발간월).",
+          "- Q2 믿어도 되나: 같은 유형 예고의 과거 최종 실현율 B와 현재 시점 집행률 A (발간월 시점 원장, RULES §7).",
           f"- Q3 얼마나 큰 일인가: 영향 규모 (사용통계 ≤ 발간월 − {USAGE_LAG}개월).",
           "- \"이번 달 주목할 것\"을 고른 규칙 (분류별 최대 1줄, 합계 최대 3줄, 해당 없으면 쓰지 않는다):"]
     L += [f"  {i}. {t}" for i, t in enumerate(ATTENTION_RULES, 1)]

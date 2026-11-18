@@ -2,6 +2,8 @@
 # 라벨 표본은 저장소에 둔다 (사용자 결정 2026-11-16)
 !outputs/validation/sample_60.user_reviewed.csv
 !outputs/validation/sample_60.claude_labeled.csv
+# 새 검증 표본 (라벨용, 원장 판정값 없음, 2026-11-18)
+!outputs/validation/holdout_30.blind.csv
 *\.pyc
 *\.pyd
 *.DS_Store

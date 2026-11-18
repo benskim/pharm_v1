@@ -9,7 +9,9 @@ usage_lag_months: &usage_lag 5
 p1:
   start_month: "2022-01"
   end_month: "2025-12"
-  signal_followup_months: 3      # 신호 실현 추적 기간
+  signal_followup_months: 3      # 신호 실현 추적 기간 (v4. v5는 비고가 남아 있는 동안 분석 끝까지 추적, RULES §10 Q4)
+  batch_min_c4: 50               # v5 일괄 가격인하: 같은 관측월·같은 유효일의 약가 변경이 성분4 이 수 이상 (RULES §3, §10 Q2)
+  batch_min_products: 0          # v5 보조 임계치: 같은 묶음의 약가 변경 건수 (0 = 쓰지 않음)
   sample_start: "2024-01"        # 회귀 시험 표본 구간
   sample_end: "2025-12"
   validation_sample_size: 60
