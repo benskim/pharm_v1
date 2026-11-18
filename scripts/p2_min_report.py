@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +17,10 @@ O = ROOT / "outputs/p2"
 MAIN = 5
 APPX = (0,)
 CONCLUSION = ("이 설정(성분 32개, 신호가 0이 아닌 칸 2~11%, 전국 단위)에서는 선행 신호 특징이 예측을 개선하지 못했고, "
-              "주입 시험에서 20% 효과도 일부만 검출되어 신호 효과를 검출할 힘이 부족했다.")   # 사용자가 고정한 결론 (2026-11-18)
+              "주입 시험에서 20% 효과도 일부만 검출되어 신호 효과를 검출할 힘이 부족했다. "
+              "실제 사건을 미리 넣은 오라클과 시점 이동(−3~+3개월)으로도 개선되지 않았다. "
+              "금액 목표에서도 같았는데, 가격 몫이 금액 변화 분산의 약 3%로 작아 완벽한 가격 정보로도 개선 상한이 2% 안팎이고, "
+              "이 모델이 그 효과를 배울 학습 예가 적었던 것으로 본다.")   # 사용자가 고정한 결론 (2026-11-19 교체). 숫자는 main()에서 계산값과 대조
 MODELS = ("M0", "M2", "M3", "M3p")
 
 
@@ -52,6 +56,9 @@ def main() -> None:
     dgc = pd.read_csv(O / "diag_compare.csv")
     dgv = pd.read_csv(O / "diag_coverage.csv").set_index("lag")
     dgm = pd.read_csv(O / "diag_mase.csv").set_index("lag")
+    dga = pd.read_csv(O / "diag_compare_claim_amt.csv")
+    ock = pd.read_csv(O / "oracle_check.csv").set_index("lag")
+    ocr = pd.read_csv(O / "oracle_check_train.csv")
     L: list[str] = []
     w = L.append
     tot = err[err["part"] == "전체"].pivot_table(index="model", columns="lag", values=["mase", "wape"])
@@ -64,6 +71,15 @@ def main() -> None:
     nzr = fe.groupby("lag")["has_signal"].mean()
     assert 0.015 <= nzr.min() and nzr.max() <= 0.115, f"고정 결론의 '2~11%'와 계산값이 다르다: {nzr.to_dict()}"
     assert len(tgt) == 32, "고정 결론의 '성분 32개'와 대상 수가 다르다"
+    # 고정 결론의 숫자와 계산값 대조 (가격 몫 '약 3%', 개선 상한 '2% 안팎', 시점 이동 −3~+3, 오라클·시점 이동 '개선되지 않음')
+    assert ock["price_share"].between(0.025, 0.04).all(), f"'약 3%'와 다르다: {ock['price_share'].to_dict()}"
+    assert ock["improvement_ceiling"].between(0.012, 0.028).all(), f"'2% 안팎'과 다르다: {ock['improvement_ceiling'].to_dict()}"
+    assert np.allclose(ock["improvement_ceiling"], 1 - np.sqrt(1 - ock["price_share"]))
+    offs = sorted(int(a.replace("M3_off", "")) for a in dgc["a"] if a.startswith("M3_off"))
+    assert offs[0] == -3 and offs[-1] == 3, offs
+    better = lambda c: c[(c["verdict_holm"] == c["a"] + "가 나음")]   # noqa: E731
+    assert better(dgc[dgc["a"].str.startswith(("M3o", "M3_off"))]).empty, "오라클·시점 이동 중 개선된 것이 있다 — 결론 문장과 다름"
+    assert better(dga[dga["a"].str.startswith("M3o")]).empty, "금액 오라클이 개선됐다 — 결론 문장과 다름"
     w(f"**결론**: {CONCLUSION}\n")
     w("**주 결과의 숫자 (공개 시차 5개월, 예측 대상 = 발간월 M의 다음 달 M+1)**: 전역 모델 M2의 MASE "
       f"{m20.mase_a:.3f}는 12개월 전 값 M0 {m20.mase_b:.3f}보다 나빴다 (M2가 나은 성분 {int(m20.a_better_series)}/{int(m20.n_series)}). "
@@ -246,6 +262,21 @@ def main() -> None:
         w(f"- lag {l}: 오라클 − E1 {100 * o.rel_diff:+.1f}% ({o.verdict_holm}), 같은 학습 기간(대상 달 2022-02~) 오라클 − M2 "
           f"{100 * dg.loc[(l, 'M3o_oracle_2022', 'M2_2022')].rel_diff:+.1f}% ({dg.loc[(l, 'M3o_oracle_2022', 'M2_2022')].verdict_holm}). "
           f"시점 이동 중 MASE가 가장 낮은 k = {int(best.k):+d} (MASE {best.mase_a:.3f}, k = 0은 {offs[offs.k == 0].mase_a.iloc[0]:.3f}).")
+    w("\n**금액 목표 오라클** (금액은 가격 변화를 기계적으로 반영하므로 개선되는지 확인, 시점 이동은 돌리지 않음):\n")
+    w("| lag | a − b | a MASE | b MASE | 상대 차이 | a가 나은 성분 | Holm 뒤 판정 |\n|---|---|---|---|---|---|---|")
+    for x in dga.assign(o=dga["lag"].map({MAIN: 0, 0: 1})).sort_values(["o", "a"]).itertuples():
+        w(f"| {x.lag} | {x.a} − {x.b} | {x.mase_a:.3f} | {x.mase_b:.3f} | {100 * x.rel_diff:+.1f}% | {x.a_better_series}/{x.n_series} | {x.verdict_holm} |")
+    w(f"\n{src('diag_compare_claim_amt.csv')}. Holm 보정은 이 표 {len(dga)}개를 한 묶음으로.\n")
+    w("**오라클 특징 점검** (금액 오라클이 개선되지 않은 원인, `scripts/p2_check_oracle_features.py`):\n")
+    w("| lag | 평가 칸 | 가격 특징 ≠ 0 칸 | 특징-실제 단가 변화 상관 (전체 / ≠0) | 기울기 (≠0) | 금액 변화 분산 중 단가 몫 | 개선 상한 1 − √(1 − 단가 몫) | 0이 아닌 학습 행 (origin별 최소 ~ 최대) / 전체 학습 행 |\n|---|---|---|---|---|---|---|---|")
+    for l in sorted(ock.index, key=lambda k: {MAIN: 0, 0: 1}.get(k, 2)):
+        x = ock.loc[l]
+        t_ = ocr[ocr["lag"] == l]
+        w(f"| {l} | {int(x.n_eval)} | {int(x.n_nonzero)} | {x.corr_all:.2f} / {x.corr_nonzero:.2f} | {x.slope_nonzero:.2f} | {pct(x.price_share)} | {pct(x.improvement_ceiling)} | "
+          f"{t_.rows_price_nonzero.min()} ~ {t_.rows_price_nonzero.max()} / {t_.train_rows.min():,} ~ {t_.train_rows.max():,} |")
+    w(f"\n{src('oracle_check.csv', 'oracle_check_train.csv')}. 가격 변경 이벤트의 성분 코드와 그 달 제품 성분 코드 일치 {pct(ock['c4_link_match'].iloc[0])}. "
+      "특징은 실제 단가 변화를 잘 따라간다(특징 생성 코드는 의도대로 작동). 그러나 금액 변화의 대부분은 수량 변화이고 단가 몫은 작다. "
+      "개선 상한은 단가와 나머지가 독립이라는 가정의 근사다. LightGBM은 잎마다 최소 20행이 필요한데(`min_child_samples`), 가격 특징이 0이 아닌 학습 행은 origin에 따라 위 범위뿐이다.\n")
     w("\n읽는 법: 오라클도 E1을 이기지 못하면, 신호가 완벽했더라도(실제 이벤트를 미리 알았더라도) 이 특징 정의와 이 모델에서는 수량 예측 개선의 여지가 작다. "
       "오라클은 이기고 M3는 못 이기면 신호의 범위·시점 쪽이다. 가장 좋은 k가 0이 아니면 창 정렬을 의심한다. 결론 문장의 범위를 넘는 해석은 하지 않는다.\n")
 

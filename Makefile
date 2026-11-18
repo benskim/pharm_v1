@@ -4,7 +4,7 @@ export PYTHONPATH := src
 
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
-        p2-t1 p2-t2 p2-t3 p2-min p2-t4 p2-t5 all
+        p2-t1 p2-t2 p2-t3 p2-diag p2-min p2-t4 p2-t5 all
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -105,9 +105,25 @@ p2-t3:
 	$(PY) -m pytest -q tests/test_p2_t3.py tests/test_p2_posthoc.py
 	$(PY) -m pbd.forecast.t3_models
 
-p2-min: p2-t1 p2-t2 p2-t3
+# P2 진단 실험 (검토 기록용, 주 모델을 바꾸지 않는다): E0~E6·E1′, 여섯 달 부록, 오라클·시점 이동, 금액 오라클, 오라클 특징 점검
+p2-diag:
+	$(PY) -m pbd.forecast.t3_models claim_amt
+	$(PY) -m pbd.forecast.t3_experiments
+	$(PY) -m pbd.forecast.t3_experiments e1_constant
+	$(PY) -m pbd.forecast.t3_horizons
+	$(PY) -I scripts/p2_diag_oracle_offset.py
+	$(PY) -I scripts/p2_diag_oracle_offset.py claim_amt
+	$(PY) -I scripts/p2_check_oracle_features.py
 
-p2-t4 p2-t5:
+# P2 T5 문서 (결과 보고서 → 2쪽 요약·README·PLAN §8 → P1 요약의 P2 행)
+p2-t5:
+	$(PY) -I scripts/p2_min_report.py
+	$(PY) -I scripts/p2_docs.py
+	$(PY) -I scripts/p1_docs.py
+
+p2-min: p2-t1 p2-t2 p2-t3 p2-diag p2-t5
+
+p2-t4:
 	$(TODO)
 
 # P1 전체. P2 단계는 구현한 뒤 all에 넣는다 (사용자 결정 2026-11-16)

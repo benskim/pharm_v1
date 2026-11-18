@@ -302,6 +302,10 @@ def check(path: Path, text: str, N) -> list[str]:
             continue
         if not (path.parent / tgt).resolve().exists():
             errs.append(f"{path.name}: 링크 대상 없음 {tgt}")
+    rep = ROOT / "reports/P2_min_result.md"
+    if rep.exists():   # 사용자가 고정한 P2 결론 문장(2026-11-19)은 인용이라 금지 표현 검사에서 뺀다
+        concl = next((x.removeprefix("**결론**: ") for x in rep.read_text(encoding="utf-8").splitlines() if x.startswith("**결론**: ")), "")
+        text = text.replace(concl, "") if concl else text
     for w in ("정확히", "완벽", "모두", "인과", "영향을 미", "인하된다", "등재된다", "중지된다", "확실히"):
         if w in text:
             errs.append(f"{path.name}: 금지 표현 '{w}'")

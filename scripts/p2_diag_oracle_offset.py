@@ -60,8 +60,11 @@ def table(fn, origins, lag, c4s, cols) -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True)[["c4", "origin", *cols]]
 
 
-def main() -> None:
-    panel, series, cls = load()
+def main(target: str = "claim_qty") -> None:
+    """target = claim_amt이면 오라클만(M2·E1·M3o) 돌리고 출력 이름에 _claim_amt를 붙인다 (금액 긍정 대조, 사용자 지시 2026-11-19)"""
+    amt = target == "claim_amt"
+    sfx = "_claim_amt" if amt else ""
+    panel, series, cls = load(target=target)
     scale = R.scale12(panel, series)
     con = connect(DB_PATH, read_only=True)
     tb = S.load_tables(con)
@@ -75,22 +78,22 @@ def main() -> None:
                           signal_nonzero=float((base[["cut_frac", "susp_frac", "listing_n"]] > 0).any(axis=1).mean())))
         runs = {"M2": {}, "E1_null": dict(feat=null), "M3o_oracle": dict(feat=orc),
                 "M2_2022": dict(train_lo="2022-02"), "M3o_oracle_2022": dict(feat=orc, train_lo="2022-02")}
-        for k in OFFS:
+        for k in (() if amt else OFFS):
             runs[f"M3_off{k:+d}"] = dict(feat=table(lambda m, a, t, k=k: S.features(tb, m, R.madd(a, k), R.madd(t, k)), fo, lag, series, S.FEATURES))
         for name, kw in runs.items():
             preds.append(R.rolling(panel, R.gbm, ORIGINS, lag, series, cls=cls, **kw).assign(model=name))
             print(f"lag {lag} {name}", flush=True)
     sc = R.score(pd.concat(preds, ignore_index=True), panel, scale)
-    pairs = [("M3o_oracle", "E1_null"), ("M3o_oracle", "M2"), ("M3o_oracle_2022", "M2_2022")] + [(f"M3_off{k:+d}", "E1_null") for k in OFFS]
+    pairs = [("M3o_oracle", "E1_null"), ("M3o_oracle", "M2"), ("M3o_oracle_2022", "M2_2022")] + [(f"M3_off{k:+d}", "E1_null") for k in (() if amt else OFFS)]
     cmp_ = add_holm(pd.DataFrame([compare(sc, a, b, lag) for lag in LAGS for a, b in pairs]))
     OUT.mkdir(parents=True, exist_ok=True)
-    cmp_.to_csv(OUT / "diag_compare.csv", index=False)
-    pd.DataFrame(cover).to_csv(OUT / "diag_coverage.csv", index=False)
-    sc.groupby(["lag", "model"])["sae"].mean().unstack().to_csv(OUT / "diag_mase.csv")
+    cmp_.to_csv(OUT / f"diag_compare{sfx}.csv", index=False)
+    pd.DataFrame(cover).to_csv(OUT / f"diag_coverage{sfx}.csv", index=False)
+    sc.groupby(["lag", "model"])["sae"].mean().unstack().to_csv(OUT / f"diag_mase{sfx}.csv")
     with pd.option_context("display.width", 250):
         print(cmp_[["lag", "a", "b", "mase_a", "mase_b", "rel_diff", "a_better_series", "verdict_holm"]].round(4).to_string(index=False))
         print(pd.DataFrame(cover))
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else "claim_qty")
