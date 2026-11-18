@@ -1,6 +1,10 @@
 # 공개 의약품 데이터로 본 시장의 선행 신호와 수요
 
-심평원 급여목록의 비고에 적힌 예고(가격 인하·등재·급여정지)를 유효일 기준 원장으로 정리한다. 그 예고가 실현된 비율과 영향 규모를, 사용통계가 공개되기 전(5개월 뒤)에 매달 1일 리포트로 낸다. 2쪽 요약: [docs/SUMMARY.md](docs/SUMMARY.md).
+심평원 급여목록의 비고에 적힌 예고(가격 인하·등재·급여정지)를 유효일 기준 원장으로 정리한다. 그 예고가 실현된 비율과 영향 규모를, 사용통계가 공개되기 전(5개월 뒤)에 매달 1일 리포트로 낸다. 
+
+<!-- P1 요약 시작 (scripts/p1_docs.py 생성) -->
+**P1 (v5.3)**: 약가 예고 최종 실현율 B 99.7%·현재 시점 집행률 A 99.7%, 급여중지 예고 B 89.3%·A 53.7% (집행정지율 47.3%), 약가 변화의 66.7%는 예고 없음. holdout 정밀도 처음 라벨 83.3%, 라벨 판정 후 90.0%. 시험 318개. 2쪽 요약: [reports/SUMMARY.md](reports/SUMMARY.md), 한계: [docs/LIMITATIONS.md](docs/LIMITATIONS.md) V1~V7, 규칙: [docs/RULES_2026-11-17.md](docs/RULES_2026-11-17.md).
+<!-- P1 요약 끝 -->
 
 | | P1 선행 신호 원장 (완료) | P2 수요 예측 (설계만) |
 |---|---|---|
@@ -16,7 +20,7 @@ data/sample/   회귀 시험용 표본 (README만 저장소에 있음, parquet�
 data/interim/  적재·원장 DB (pbd.duckdb, 생성물)
 docs/          설계(PLAN_P1·P2), 자료(DATA), 결정(DECISIONS), 한계(LIMITATIONS), 요약(SUMMARY), 재현 로그
 reference/     표본 점검 스크립트와 기대 출력 (make check-sample의 기준)
-reports/       단계별 결과 보고서 (S0, P1 S1 ~ S6)
+reports/       단계별 결과 보고서 (S0, P1 S1 ~ S6, v5 원장 v5~v5.3, holdout 정밀도), 2쪽 요약 SUMMARY.md
 src/pbd/       코드 (ledger/ = P1, forecast/ = P2)
 tests/         시험
 outputs/       생성물 (리포트 Markdown은 저장소에 있음, CSV는 생성)
@@ -32,11 +36,11 @@ Python 3.11, 디스크 약 5GB (원본 2.3GB, DB 약 1.7GB).
 ```
 make venv                      # .venv 생성, requirements.txt 설치 (약 1~2분)
 make check-sample              # 표본 회귀: reference/precheck_v3_output.md와 같아야 한다
-make all                       # = p1-all: S0 → check-sample → P1 S1 ~ S6 → 전체 시험 (약 10분)
+make all                       # = p1-all: S0 → check-sample → P1 S1 → S2 → v5 원장 → S4 → S5 → S6 → 전체 시험
 make report MONTH=2024-09      # 한 달 리포트 → outputs/reports/P1_report_2024-09.md, outputs/dashboard/2024-09/
-make test                      # 전체 시험 (213개, 약 3분)
+make test                      # 전체 시험 (시험 수는 위 P1 요약 블록)
 ```
-깨끗한 클론에서 `make all`(613초), `make test`(213개 통과), `make report MONTH=2024-09`가 모두 성공했다. 리포트 2개는 커밋된 파일과 해시가 같다 ([docs/REPRODUCE_LOG.md](docs/REPRODUCE_LOG.md)). P2 단계는 구현한 뒤 `all`에 넣는다. 라벨을 채운 검증 표본(`outputs/validation/sample_60.user_reviewed.csv`)은 저장소에 있고, `make p1-s4`는 이 파일을 덮어쓰지 않는다.
+깨끗한 클론 재현 기록은 v4 원장 시점(2026-11-16)의 것이다 ([docs/REPRODUCE_LOG.md](docs/REPRODUCE_LOG.md)). v5.3에서는 깨끗한 클론 재현을 다시 하지 않았다. v4 원장은 `outputs/v4_legacy/`에 읽기 전용으로 있고 기본 경로(`make all`)에서 쓰지 않는다 (`make p1-v4-legacy`). P2 단계는 구현한 뒤 `all`에 넣는다. 라벨을 채운 검증 표본(`outputs/validation/sample_60.user_reviewed.csv`)은 저장소에 있고, `make p1-s4`는 이 파일을 덮어쓰지 않는다.
 
 ## 예시 리포트
 - [2024-09](outputs/reports/P1_report_2024-09.md): 시타글립틴 인하 예고, 아픽사반 등재 예고
@@ -52,6 +56,8 @@ make test                      # 전체 시험 (213개, 약 3분)
 | [docs/DATA.md](docs/DATA.md) | 입력 데이터, 알려진 위험, 사용통계 공개 시차 |
 | [docs/NOTE_RULES.md](docs/NOTE_RULES.md) | 비고 유형별 규칙 |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 정한 것과 근거 (날짜별) |
-| [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | 한계 (자료 / 규칙·판정 / 검증 / 리포트 / 사용통계 시차) |
+| [docs/RULES_2026-11-17.md](docs/RULES_2026-11-17.md) | v5 판정 규칙 (용어·상태·이벤트·신호·지표, §11 결정) |
+| [reports/SUMMARY.md](reports/SUMMARY.md) | 2쪽 요약 (v5.3, `scripts/p1_docs.py` 생성) |
+| [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | 한계 (v5.3 V1~V7 먼저, 그다음 자료 / 규칙·판정 / 검증 / 리포트 / 사용통계 시차) |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | 2차 항목 (구현하지 않음) |
 | [reports/](reports/) | 단계별 결과: [S0](reports/S0_result.md), [S1](reports/P1_S1_result.md), [S2](reports/P1_S2_result.md), [S3](reports/P1_S3_result.md), [S4](reports/P1_S4_result.md), [S5](reports/P1_S5_result.md), [S6](reports/P1_S6_result.md) |
