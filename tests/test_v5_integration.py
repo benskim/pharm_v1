@@ -167,7 +167,8 @@ def test_stay_then_delisted_12_suspension(con):
     """RULES §6.3: 급여중지 예고 12건 = 동아에스티 기간 중지 11 + 아노핀정 급여정지(22.3.18.) 1, 미실현 stay_then_delisted"""
     r = ev(con, """select count(*), count(*) filter (where reason_external is not null) from signal_v5
                    where signal_type = 'SUSPEND_NOTICE' and outcome = 'NOT_REALIZED' and reason = 'stay_then_delisted'""")
-    assert r == [(12, 11)]
+    # 12건 + 외부 집행정지 경로(2026-11-18)로 막힌 경보제약 665001940 (2025-08 뒤 삭제) = 13, 외부 근거 11(동아에스티) + 1(경보제약)
+    assert r == [(13, 12)]
     assert ev(con, "select reason from signal_v5 where signal_id = 'SUSPEND_NOTICE:642302580:2022-03-18'") == [("stay_then_delisted",)]
 
 
@@ -226,3 +227,29 @@ def test_excluded_reasons_three(con):
     r = dict(ev(con, "select exclude_reason, count(*) from signal_v5 where outcome = 'EXCLUDED' group by 1"))
     assert r == {"급여중지 중 예고": 6, "인하일 전 급여중지": 1, "대상 소멸": 4}
     assert ev(con, "select reason from signal_v5 where signal_id = 'PRICE_NOTICE:697100360:2024-03-01'") == [("suspended_before_price_date",)]
+
+
+
+@pytest.mark.parametrize("old,new", [("693903640", "693903820"), ("693903540", "693903880")])
+def test_name_parentheses_recode_holdout_7_8(con, old, new):
+    """holdout 7·8 셀트리온제약 네시나액트정·이달비클로정: 이름 차이가 성분 괄호뿐 → 코드 변경 (2026-11-18)"""
+    r = ev(con, "select kind, link_basis from event_ledger_v5 where event_type = 'SUCCESSION' and product_code = ? and counterpart = ?", new, old)
+    assert r == [("recode", "same_name")]
+
+
+def test_external_stay_kyongbo_2025_06(con):
+    """외부 집행정지 경로 첫 항목: 경보제약 급여정지(25.6.24.) 23건 → 미결(집행정지 중) 22 + 집행정지 중 삭제 1 (665001940),
+    target_source = external. 급여중지 예고 B = 109/122 (RULES §11)"""
+    r = dict(ev(con, """select coalesce(current_status, reason), count(*) from signal_v5 where signal_type = 'SUSPEND_NOTICE'
+                       and signal_date = '2025-06-24' and stay_blocked and stay_target_source = 'external' group by 1"""))
+    assert r == {"ONGOING_STAY": 22, "stay_then_delisted": 1}
+    assert ev(con, "select reason from signal_v5 where signal_id = 'SUSPEND_NOTICE:665001940:2025-06-24'") == [("stay_then_delisted",)]
+    x = ev(con, """select count(*), count(*) filter (where target_source = 'external' and external_ref like '%dailypharm.com/user/news/4216%'
+                   and stay_decision_date = '2025-07-09') from stay_v5 where stay_date = '2025-06-18'""")
+    assert x == [(23, 23)]
+
+
+def test_gap_months_shown(con):
+    """같은 허가 연결은 기간 제한 없음, gap_months를 이벤트 표에 둔다 (holdout 2: 공백 25개월, 3: 11개월)"""
+    r = dict(ev(con, "select product_code, gap_months from event_ledger_v5 where event_type = 'SUCCESSION' and product_code in ('671707190', '655404620')"))
+    assert r == {"671707190": 25, "655404620": 11}

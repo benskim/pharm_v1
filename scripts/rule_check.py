@@ -167,6 +167,28 @@ def status(D, pc, m):
 
 
 # ---------------------------------------------------------------- 코드 이어받기 (§3-1, 순서 1·2·3·4)
+KEEP_PAREN_WORDS = ("1회용", "수출명", "무보존제", "프리필드", "펜", "바이알", "앰플", "백")
+
+
+def nm(name):
+    """제품명(밑줄 앞): 괄호 안 성분 표기와 공백을 지운다. 괄호 안에 제형·포장·수출명 단어가 있으면 그 괄호는 남긴다 (2026-11-18)"""
+    x = (name or "").split("_")[0]
+    kept = []
+    def sub(mt):
+        if any(w in mt.group(0) for w in KEEP_PAREN_WORDS):
+            kept.append(mt.group(0))
+            return "<%d>" % (len(kept) - 1)
+        return ""
+    while True:
+        y = re.sub(r"\([^()]*\)", sub, x)
+        if y == x:
+            break
+        x = y
+    while re.search(r"<\d+>", x):
+        x = re.sub(r"<(\d+)>", lambda mt: kept[int(mt.group(1))], x)
+    return re.sub(r"\s+", "", x)
+
+
 def first_last(D, pc):
     S = D.series(pc)
     ms = [m for m in D.months if S[m]["in_b"]]
@@ -191,7 +213,7 @@ def link_for_exit(D, pc, gone):
         diff = firm != o["firm"]
         if item and ni == item and ing == o["ing"] and g <= e + 1:
             cands.append((1, abs(e - g), npc, "transfer" if diff else "recode", "same_item", e))
-        if ing == o["ing"] and abs(e - g) <= 1 and (name or "").split("_")[0] == (o["name"] or "").split("_")[0]:
+        if ing == o["ing"] and abs(e - g) <= 1 and nm(name) == nm(o["name"]):
             cands.append((2, abs(e - g), npc, "transfer" if diff else "recode", "same_name", e))     # §11-3
         if ing == o["ing"] and abs(e - g) <= 1 and not diff:
             cands.append((3, abs(e - g), npc, "swap", "same_firm_ingredient", e))
@@ -222,7 +244,7 @@ def link_for_entry(D, pc, entry):
             diff = firm != o["firm"]
             if item and D.item(xpc) == item and ing == o["ing"] and g <= e + 1:
                 cands.append((1, abs(e - g), xpc, "transfer" if diff else "recode", "same_item", g))
-            if ing == o["ing"] and abs(e - g) <= 1 and (name or "").split("_")[0] == (o["name"] or "").split("_")[0]:
+            if ing == o["ing"] and abs(e - g) <= 1 and nm(name) == nm(o["name"]):
                 cands.append((2, abs(e - g), xpc, "transfer" if diff else "recode", "same_name", g))     # §11-3
             if ing == o["ing"] and abs(e - g) <= 1 and not diff:
                 cands.append((3, abs(e - g), xpc, "swap", "same_firm_ingredient", g))

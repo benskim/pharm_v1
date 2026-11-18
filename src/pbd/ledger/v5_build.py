@@ -25,7 +25,7 @@ import pandas as pd
 
 from pbd.common import ROOT, connect, load_yaml
 from pbd.ledger.v5_rules import (
-    ONGOING_STAY_TEXT, Event, Life, Obs, stay_records, Tok, base, check_transitions, derive_signals, derive_stays, derive_status, exit_reentry_events, flag_batch,
+    ONGOING_STAY_TEXT, Event, Life, Obs, Stay, month_of, stay_records, Tok, base, check_transitions, derive_signals, derive_stays, derive_status, exit_reentry_events, flag_batch,
     link_codes, price_events, price_type, state_of,
 )
 
@@ -95,13 +95,17 @@ def external_config():
             mt = e["match"]
             targets.append(("PRICE_NOTICE", mt["issued_month"], dt.date.fromisoformat(mt["signal_date"]),
                             tuple(dt.date.fromisoformat(x) for x in e["stay_target"]), e["id"]))
-    return lift, targets
+    ext_stays = []
+    for e in cfg.get("external_stay", []):
+        ext_stays.append(dict(e, signal_date=dt.date.fromisoformat(e["signal_date"]), stay_date=dt.date.fromisoformat(e["stay_date"]),
+                              stay_decision_date=dt.date.fromisoformat(e["stay_decision_date"]) if e.get("stay_decision_date") else None))
+    return lift, targets, ext_stays
 
 
 def build(con) -> dict:
     months, b, s, t, items, recode = load_inputs(con)
     obs, attrs = build_obs(months, b, s, t)
-    lift_cfg, target_cfg = external_config()
+    lift_cfg, target_cfg, ext_stay_cfg = external_config()
     codes = sorted(obs)
 
     # 1. 상태 (급여목록만)
@@ -141,6 +145,7 @@ def build(con) -> dict:
 
     # 3. 집행정지·신호
     all_stays, all_sigs = {}, {}
+    ext_hits: dict[str, list] = {}
     for pc in codes:
         stays = derive_stays(months, obs[pc])
         all_stays[pc] = stays
@@ -151,8 +156,25 @@ def build(con) -> dict:
             ext = {(a, c): ds for a, b_, c, ds, _ in target_cfg
                    if any(s.signal_type == a and s.first_month == b_ and s.signal_date == c for s in sigs)}
             sigs = derive_signals(pc, months, obs[pc], status[pc], stays, successors=succ.get(pc), external_targets=ext)
+        # 외부 집행정지 (v5.3): 업체(최초 기재 달 급여목록)·신호 유형·신호 날짜가 맞는 신호를 외부 집행정지로 막힘 처리
+        ext_st = {}
+        for e in ext_stay_cfg:
+            for g in sigs:
+                f = attrs.get(pc, {}).get(g.first_month, (None,))[0]
+                if g.signal_type == e["signal_type"] and g.signal_date == e["signal_date"] and f == e["firm"]:
+                    ext_st[(g.signal_type, g.signal_date)] = (Stay(e["stay_date"], month_of(e["stay_date"]), None, False),)
+                    ext_hits.setdefault(e["id"], []).append((pc, g.signal_id))
+        if ext_st:
+            ext = {(a, c): ds for a, b_, c, ds, _ in target_cfg
+                   if any(s.signal_type == a and s.first_month == b_ and s.signal_date == c for s in sigs)}
+            sigs = derive_signals(pc, months, obs[pc], status[pc], stays, successors=succ.get(pc), external_targets=ext or None,
+                                  external_stays=ext_st)
         all_sigs[pc] = sigs
 
+    for e in ext_stay_cfg:
+        n = len(ext_hits.get(e["id"], []))
+        if e.get("expected_count") is not None and n != e["expected_count"] and len(months) == 48:
+            raise RuntimeError(f"외부 집행정지 {e['id']}: 맞는 신호 {n}건, 기대 {e['expected_count']}건")
     # 4. 이벤트
     ev_rows = []
 
@@ -240,6 +262,12 @@ def build(con) -> dict:
     batch_rows = [dict(observed_month=m, **v, min_c4=p1.get("batch_min_c4", 50)) for m, v in sorted(bstats.items())]
 
     dl_codes = {e["product_code"] for e in ev_rows if e["event_type"] == "STAY_START" and e["kind"] == "delisting_target"}
+    # 외부 집행정지 시작 이벤트 (유효일 = 외부 결정일, 급여목록 비고 없음)
+    for e in ext_stay_cfg:
+        for pc, sid in ext_hits.get(e["id"], []):
+            add(pc, Event("STAY_START", "external", month_of(e["stay_date"]), effective_date=e["stay_date"], date_source="external",
+                          known_month=month_of(e["stay_date"]), signal_id=sid, stay_target=e.get("target_type"), stay_target_source="external",
+                          evidence=e["note"] + " | " + " ".join(e.get("evidence", []))), "external:" + e["stay_date"].isoformat())
     # 5. 표 쓰기
     state_rows, rev_rows = [], []
     for pc in codes:
@@ -273,6 +301,7 @@ def build(con) -> dict:
     for e in load_yaml("external_evidence.yaml").get("target_gone", []):
         for sid in e["signal_ids"]:
             gone_ext[sid] = e["reason_external"]
+    ext_stay_note = {sid: e["note"] + " | " + " ".join(e.get("evidence", [])) for e in ext_stay_cfg for _, sid in ext_hits.get(e["id"], [])}
     sig_rows = []
     tgt_rows = []
     for pc in codes:
@@ -282,7 +311,8 @@ def build(con) -> dict:
             d["source_list"] = "+".join(g.source_list)
             d["raw_types"] = "+".join(g.raw_types)
             d["market_c4"] = c4_at(pc, g.first_month)
-            d["reason_external"] = ext_reason.get((g.signal_type, g.first_month, g.signal_date, g.reason)) or gone_ext.get(g.signal_id)
+            d["reason_external"] = (ext_reason.get((g.signal_type, g.first_month, g.signal_date, g.reason)) or gone_ext.get(g.signal_id)
+                                    or ext_stay_note.get(g.signal_id))
             d["exclude_reason"] = EXCLUDE_LABEL.get(g.reason) if g.outcome == "EXCLUDED" else None
             d["reason_text"] = ONGOING_STAY_TEXT if g.current_status == "ONGOING_STAY" else None
             sig_rows.append(d)
@@ -304,6 +334,18 @@ def build(con) -> dict:
                          target_source="timing")
             r["n_months"] = len(sy.months)
             stay_rows.append(r)
+        for e in ext_stay_cfg:                 # 외부 집행정지 기록 칸 (§5)
+            for hp, sid in ext_hits.get(e["id"], []):
+                if hp != pc:
+                    continue
+                g = next(x for x in all_sigs[pc] if x.signal_id == sid)
+                d = g.signal_date
+                stay_rows.append(dict(stay_id=f"STAY:{pc}:{e['stay_date'].isoformat()}", product_code=pc, stay_date=e["stay_date"],
+                                      stay_decision_date=e["stay_decision_date"], first_month=month_of(e["stay_date"]), end_month=None,
+                                      stay_end_date=None, stay_end_reason="delisted" if g.reason == "stay_then_delisted" else None,
+                                      left_censored=False, released_by_r5=None, target_type=e.get("target_type", "unknown"),
+                                      target_signal_id=sid, target_detail=f"{d.year % 100}.{d.month}.{d.day}. 급여중지",
+                                      target_source="external", external_ref=" ".join(e.get("evidence", [])), n_months=0))
     pair_rows = [asdict(p) for p in link.pairs]
 
     def put(name, rows, cols=None):

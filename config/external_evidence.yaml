@@ -104,3 +104,18 @@ target_gone:
       - "PRICE_NOTICE:643501450:2024-07-01"      # 심바스트씨알정(심바스타틴)
       - "PRICE_NOTICE:648900640:2024-07-01"      # 유나신정375mg(설타미실린토실산염수화물)
       - "PRICE_NOTICE:667400020:2024-07-01"      # 뉴트리플렉스48주사
+
+# v5.3 외부 집행정지 경로 (사용자 결정 2026-11-18, RULES §5·§11): 급여목록에 집행정지 비고가 없어도 외부 자료로 확인한 집행정지로
+# 대상 신호를 막힘 처리한다 (target_source = external). 맞는 신호 수가 expected_count와 다르면 빌드를 멈춘다.
+external_stay:
+  - id: kyongbo_2025_06_stay
+    firm: "(주)경보제약"
+    signal_type: SUSPEND_NOTICE
+    signal_date: "2025-06-24"            # 급여목록 비고 급여정지(25.6.24.)
+    expected_count: 23
+    stay_date: "2025-06-18"              # 대전지법 임시 집행정지
+    stay_decision_date: "2025-07-09"     # 본 집행정지 인용
+    target_type: suspension
+    note: "경보제약 23개 품목 허가취소에 따른 급여중지. 대전지법 2025-06-18 임시 집행정지, 2025-07-09 본 집행정지 인용 (급여목록에 집행정지 비고 없음)"
+    evidence:
+      - https://m.dailypharm.com/user/news/4216

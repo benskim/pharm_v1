@@ -764,3 +764,53 @@ def test_excluded_target_gone_without_suspension():
     obs = {"2024-01": B(110), "2024-02": B(110, R2("2024-03-01", 94)), "2024-03": Obs(), "2024-04": Obs()}
     _, _, sigs = run(m, obs)
     assert (sigs[("PRICE_NOTICE", D("2024-03-01"))].outcome, sigs[("PRICE_NOTICE", D("2024-03-01"))].reason) == ("EXCLUDED", "target_gone")
+
+
+def test_link_name_ignores_ingredient_parentheses_nesina():
+    """§3-1 순서 2 (2026-11-18 holdout 반영): 괄호 안 성분 표기를 지우고 비교. holdout 7 셀트리온제약 네시나액트정25/15
+    693903640 `네시나액트정25/15밀리그램`(~2024-11) → 693903820 `네시나액트정25/15밀리그램(알로글립틴벤조산염,피오글리타존염산염)`(2025-01~) = 코드 변경"""
+    m = cal("2024-10", "2025-02")
+    f = "(주)셀트리온제약"
+    lives = {"693903640": life(cal("2024-10", "2024-11"), f, "네시나액트정25/15밀리그램", "630500ATB", None),
+             "693903820": life(cal("2025-01", "2025-02"), f, "네시나액트정25/15밀리그램(알로글립틴벤조산염,피오글리타존염산염)", "630500ATB", "202303455")}
+    r = link_codes(m, lives)
+    assert [(p.old, p.new, p.kind, p.link_basis, p.gap_months) for p in r.pairs] == [("693903640", "693903820", "recode", "same_name", 1)]
+
+
+def test_external_stay_blocks_suspension():
+    """외부 집행정지 경로 (2026-11-18): 급여목록에 집행정지 비고가 없어도 config의 외부 집행정지로 막힘 (target_source = external).
+    경보제약 급여정지(25.6.24.): 대전지법 2025-06-18 임시, 2025-07-09 본 집행정지 → 2025-12 기준 미결(집행정지 중).
+    집행정지 중 삭제되면 미실현 stay_then_delisted"""
+    from pbd.ledger.v5_rules import Stay
+    m = cal("2025-05", "2025-12")
+    ext = {("SUSPEND_NOTICE", D("2025-06-24")): (Stay(D("2025-06-18"), "2025-06", None, False),)}
+    obs = {mo: B(100) for mo in m}
+    obs["2025-06"] = B(100, R3("2025-06-24"))
+    _, _, sigs = run(m, obs, external_stays=ext)
+    s = sigs[("SUSPEND_NOTICE", D("2025-06-24"))]
+    assert (s.outcome, s.current_status, s.stay_blocked, s.stay_target_source, s.blocking_stays) == \
+        ("CENSORED", "ONGOING_STAY", True, "external", (D("2025-06-18"),))
+    gone = dict(obs)
+    for mo in cal("2025-09", "2025-12"):
+        gone[mo] = Obs()
+    _, _, sigs = run(m, gone, external_stays=ext)
+    s = sigs[("SUSPEND_NOTICE", D("2025-06-24"))]
+    assert (s.outcome, s.reason, s.stay_blocked) == ("NOT_REALIZED", "stay_then_delisted", True)
+    # 외부 집행정지가 없으면 기존대로 비고 사라짐 → 미실현
+    _, _, sigs = run(m, obs)
+    assert sigs[("SUSPEND_NOTICE", D("2025-06-24"))].reason == "note_gone"
+
+
+def test_name_keeps_form_parentheses():
+    """제품명 정규화 (2026-11-18 v5.3 마무리): 공백 제거는 유지. 괄호 안에 1회용·수출명·무보존제·프리필드·펜·바이알·앰플·백이 있으면
+    그 괄호는 지우지 않는다. 성분 괄호는 지운다"""
+    from pbd.ledger.v5_rules import name_key
+    assert name_key("레스타시스점안액0.05%(사이클로스포린)") == name_key("레스타시스점안액0.05%")
+    assert name_key("레스타시스점안액0.05%(사이클로스포린)") != name_key("레스타시스점안액0.05%(사이클로스포린)(1회용)")
+    assert name_key("조터나흡입용캡슐 110/50마이크로그램") == name_key("조터나흡입용캡슐110/50마이크로그램")
+    for w in ("1회용", "수출명 : X", "무보존제", "프리필드", "펜", "바이알", "앰플", "백"):
+        assert name_key(f"가주({w})") != name_key("가주"), w
+    m = cal("2024-01", "2024-02")
+    lives = {"A": life(["2024-01"], "갑", "가점안액(성분)", "111101COS", None),
+             "B": life(["2024-02"], "을", "가점안액(성분)(1회용)", "111101COS", None)}
+    assert link_codes(m, lives).pairs == []          # 이름이 달라 순서 2 아님, 업체가 달라 순서 3도 아님

@@ -55,7 +55,8 @@ USER_TRUTH = {
     31: ("PRICE_CHANGE|unobserved_notice", "2022-09-01", "비고에 예고 날짜 없음 → 인하 금액이 기록된 달의 1일 (사용자 검토 2026-11-15)", "raw"),
     35: ("PRICE_NOTICE|REALIZED", "2022-09-14;2022-10", "예고일이 있어 그날 시행 (사용자 검토 2026-11-15)", "raw"),
     44: ("STAY_END|released", "2025-11-20", "보건복지부 고시 제2025-187호, 시행일 2025.11.20. (docs/evidence/보험_제2025-423_1_고시.pdf)", "external"),
-    51: ("SUSPEND_NOTICE|NOT_REALIZED:note_gone", "2025-06-24;2025-07", "확인 스냅샷에 제품 있고 정지·집행정지 비고 없음 → 비고 사라짐. 외부 원인(집행정지)은 reason_external (사용자 검토 2026-11-15)", "raw"),
+    # 2026-11-18 정정 (사용자 결정): 이전 정답 "SUSPEND_NOTICE|NOT_REALIZED:note_gone" (raw, 2026-11-15) → 외부 집행정지 경로 반영
+    51: ("SUSPEND_NOTICE|CENSORED:ONGOING_STAY|blocked", "2025-06-24;2025-07", "경보제약 급여정지(25.6.24.), 대전지법 2025-07-09 본 집행정지, https://m.dailypharm.com/user/news/4216 (2026-11-18 정정, 이전 정답: 미실현·비고 사라짐)", "external"),
     59: ("SUCCESSION|transfer", "2024-11-01", "같은 품목, 함량 표기 방식만 바뀜 (사용자 검토 2026-11-15). 한국산도스 → 삼일제약 같은 허가 = 양도양수 (RULES §3-1 예)", "raw"),
     11: ("DELISTING|delisting_spec", "2022-10-02~2022-11-01", "RULES §9: 디어큐어점안액 15mg/0.5mL, 같은 허가 안 특정 규격의 급여삭제", "raw"),
     12: ("SUCCESSION_OUT|transfer", "2024-08-01", "RULES §9: 휴듀오서방정 → 대웅제약 포시로멧서방정(같은 허가 202300356 승계) = 양도양수 (넘겨준 쪽)", "raw"),

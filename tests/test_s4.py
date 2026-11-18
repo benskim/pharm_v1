@@ -147,12 +147,13 @@ def con():
 
 @db
 def test_a1_v5_rates_match_rules(con):
-    """RULES §7 (2026-11-18): 급여중지 예고 A = 109/203, B = 109/144, 집행정지율 = 73/203. 삭제 예고는 건수만"""
+    """RULES §7 (2026-11-18) + 외부 집행정지 경로(경보제약 23건: 미결 22, 집행정지 중 삭제 1): 급여중지 예고 A = 109/203,
+    B = 109/(144 − 22) = 109/122, 집행정지율 = (73 + 23)/203. 삭제 예고는 건수만"""
     import pandas as pd
     r = pd.read_csv(ROOT / "outputs/s4/a1_by_type.csv").set_index("signal_type")
     assert (r.loc["SUSPEND_NOTICE", "A_k"], r.loc["SUSPEND_NOTICE", "A_n"]) == (109, 203)
-    assert (r.loc["SUSPEND_NOTICE", "B_k"], r.loc["SUSPEND_NOTICE", "B_n"]) == (109, 144)
-    assert (r.loc["SUSPEND_NOTICE", "stay_k"], r.loc["SUSPEND_NOTICE", "stay_n"]) == (73, 203)
+    assert (r.loc["SUSPEND_NOTICE", "B_k"], r.loc["SUSPEND_NOTICE", "B_n"]) == (109, 122)
+    assert (r.loc["SUSPEND_NOTICE", "stay_k"], r.loc["SUSPEND_NOTICE", "stay_n"]) == (96, 203)
     assert pd.isna(r.loc["DELISTING_NOTICE", "A_rate"])
     want = dict(con.execute("select signal_type, count(*) from signal_v5 group by 1").fetchall())
     assert dict(zip(r.index, r["n"])) == want
@@ -183,7 +184,13 @@ def test_holdout_30(con):
     assert not (set(a["product_code"]) | set(a["counterpart"].dropna())) & s60
     assert a["product_code"].is_unique
     blind = pd.read_csv(ROOT / "outputs/validation/holdout_30.blind.csv", dtype=str)
-    assert len(blind) == 30 and list(blind["product_code"]) == list(a["product_code"])
+    key = pd.read_csv(ROOT / "outputs/validation/holdout_30.key.csv", dtype=str)
+    # 라벨 파일이 있으면 표본은 고정 (대응표 재사용, 2026-11-18): 라벨용 파일 = 고정 대응표의 제품
+    fixed = (ROOT / "outputs/validation/holdout_30.labeled.csv").exists()
+    want = list(key["product_code"]) if fixed else list(a["product_code"])
+    assert len(blind) == 30 and list(blind["product_code"]) == want
+    assert key.groupby("stratum").size().to_dict() == {n: 3 for n, _, _ in S4.HOLDOUT_STRATA}
+    assert not set(key["product_code"]) & s60
     leak = {"stratum", "record_id", "outcome", "kind", "event_type", "signal_type", "ledger_claim", "counterpart", "reason"}
     assert not leak & set(blind.columns)
     assert blind[list(S4.TRUTH_COLS)].isna().all().all()

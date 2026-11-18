@@ -308,7 +308,8 @@ def _window(con, pc: str, ref: str) -> tuple[str, str, str]:
 
 
 def _candidates(con, pc: str, ref: str) -> str:
-    """같은 품목기준코드 또는 같은 주성분코드(9자리)의 다른 코드 중 기준월 전후 2개월 안에 처음 실리거나 마지막으로 실린 코드 (원문 칸만)"""
+    """후보 코드 (원문 칸만): 같은 품목기준코드의 다른 코드는 기간 제한 없이 모두 (2026-11-18 holdout 반영),
+    같은 주성분코드(9자리)의 다른 코드는 기준월 전후 2개월 안에 처음 실리거나 마지막으로 실린 것"""
     rows = con.execute("""with me as (select any_value(ingredient_code) ing from stg_benefit where product_code = ? and row_kind = 'product_candidate'),
              it as (select item_code from bridge_product_item where product_code = ?),
              w as (select list_month from cal_v5 where mi between (select mi from cal_v5 where list_month = ?) - 2
@@ -321,15 +322,22 @@ def _candidates(con, pc: str, ref: str) -> str:
         from life l where l.product_code <> ?
           and (l.product_code in (select product_code from bridge_product_item where item_code in (select item_code from it))
                or l.product_code in (select product_code from stg_benefit where ingredient_code = (select ing from me)))
-          and (l.f in (select list_month from w) or l.l in (select list_month from w))
+          and (l.product_code in (select product_code from bridge_product_item where item_code in (select item_code from it))
+               or l.f in (select list_month from w) or l.l in (select list_month from w))
         order by same_item desc, l.product_code limit 12""", [pc, pc, ref, ref, pc]).fetchall()
     return " ; ".join(f"{c}({'같은 허가' if si else '같은 성분'}, {f} / {n} / {p}, {a}~{b})" for c, f, n, p, a, b, si in rows) or "(없음)"
 
 
 def build_holdout(con, seed: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """(blind, key). blind = 라벨용 (원장 판정값 없음). key = holdout_id ↔ 원장 기록 (라벨을 마친 뒤 대조할 때만 연다)"""
+    """(blind, key). blind = 라벨용 (원장 판정값 없음). key = holdout_id ↔ 원장 기록 (라벨을 마친 뒤 대조할 때만 연다).
+    라벨 파일(holdout_30.labeled.csv)이 있으면 표본은 고정한다: 기존 key의 기록을 그대로 쓰고 라벨용 칸만 다시 채운다"""
     s60 = pd.read_csv(VAL / "sample_60.user_reviewed.csv", dtype=str)
-    pick = holdout_pick(con, seed, set(s60["product_code"]))
+    if (VAL / "holdout_30.labeled.csv").exists() and (VAL / KEY_NAME).exists():
+        pick = pd.read_csv(VAL / KEY_NAME, dtype=str)
+        pick["holdout_id"] = pick["holdout_id"].astype(int)
+        pick["counterpart"] = None
+    else:
+        pick = holdout_pick(con, seed, set(s60["product_code"]))
     blind = []
     for r in pick.itertuples():
         wb, ws, life = _window(con, r.product_code, r.ref_month)

@@ -13,6 +13,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import math
+import re
 from dataclasses import dataclass, field, replace
 
 ONE = dt.timedelta(days=1)
@@ -447,11 +448,14 @@ def _collect(code: str, months: list[str], obs: dict, status: StatusResult, stay
 
 
 def derive_signals(code: str, months: list[str], obs: dict, status: StatusResult, stays: list[Stay],
-                   successors: dict | None = None, external_targets: dict | None = None) -> list[Signal]:
+                   successors: dict | None = None, external_targets: dict | None = None,
+                   external_stays: dict | None = None) -> list[Signal]:
     """successors: {사라진 첫 달: (새 코드, 새 코드 obs, 새 코드 StatusResult)}.
     external_targets: {(신호 유형, 신호 날짜): (집행정지 날짜, ...)} — 대상 집행정지를 외부로 정함 (stay_target_source = external)"""
     successors = successors or {}
     external_targets = external_targets or {}
+    # 외부 집행정지 (2026-11-18): {(신호 유형, 신호 날짜): (Stay, ...)} — 급여목록에 집행정지 비고가 없을 때 외부 자료로 막힘
+    external_stays = external_stays or {}
     sigs = _collect(code, months, obs, status, stays)
     idx = {m: i for i, m in enumerate(months)}
     stay_by = {s.date: s for s in stays}
@@ -465,6 +469,8 @@ def derive_signals(code: str, months: list[str], obs: dict, status: StatusResult
 
     def candidates(s: Signal) -> tuple[list[Stay], str]:
         key = (s.signal_type, s.signal_date)
+        if key in external_stays:
+            return list(external_stays[key]), "external"
         if key in external_targets:
             return [stay_by[d] for d in external_targets[key] if d in stay_by], "external"
         return [x for x in stays if not x.left_censored and x.first_month >= s.first_month], "timing"
@@ -743,6 +749,32 @@ def stay_records(code: str, stays: list, signals: list) -> list[dict]:
 
 
 # ---------------------------------------------------------------- 코드 이어받기 (§3-1)
+KEEP_PAREN_WORDS = ("1회용", "수출명", "무보존제", "프리필드", "펜", "바이알", "앰플", "백")
+
+
+def name_key(name: str | None) -> str:
+    """순서 2 제품명 비교용 이름 (사용자 결정 2026-11-18): 밑줄 앞 제품명에서 괄호 안 성분 표기를 지우고 공백을 지운다.
+    괄호 안에 KEEP_PAREN_WORDS(제형·포장·수출명 표시)가 있으면 그 괄호는 남긴다. 중첩 괄호는 안쪽부터"""
+    x = (name or "").split("_")[0]
+    keep: list[str] = []
+
+    def sub(mt):
+        t = mt.group(0)
+        if any(w in t for w in KEEP_PAREN_WORDS):
+            keep.append(t)
+            return f"\x00{len(keep) - 1}\x00"
+        return ""
+    while True:
+        y = re.sub(r"\([^()]*\)", sub, x)
+        if y == x:
+            break
+        x = y
+    for i, t in enumerate(keep):                       # 남긴 괄호를 되돌린다 (안쪽부터 바꿨으므로 바깥쪽 안에 들어 있을 수 있다)
+        x = x.replace(f"\x00{i}\x00", t)
+    while "\x00" in x:
+        x = re.sub(r"\x00(\d+)\x00", lambda mt: keep[int(mt.group(1))], x)
+    return re.sub(r"\s+", "", x)
+
 @dataclass
 class Pair:
     old: str
@@ -813,7 +845,7 @@ def link_codes(months: list[str], lives: dict) -> LinkResult:
         for a, b in runs:
             if b < n - 1:
                 ext.append((code, b + 1))
-    prefix = lambda s: (s or "").split("_")[0]
+    prefix = name_key
     cands = []
     ext_by_item: dict[tuple, list] = {}
     ext_by_ing: dict[str, list] = {}

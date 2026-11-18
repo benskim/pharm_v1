@@ -435,7 +435,7 @@ def remaining_counts(con, month: str) -> None:
 def events_this_month(con, month: str) -> pd.DataFrame:
     remaining_counts(con, month)
     # 제품명·업체: 이번 달 행, 없으면(사라진 제품) 직전 스냅샷 행
-    df = con.execute("""select e.event_type, e.kind, e.product_code, coalesce(p1.product_name, p0.product_name) product_name,
+    df = con.execute("""select e.event_type, e.kind, e.counterpart, e.gap_months, e.product_code, coalesce(p1.product_name, p0.product_name) product_name,
                coalesce(p1.firm, p0.firm) firm, e.market_c4 c4, r.ingredient_code, n.ingredient_name, g.short_name, g.group_key,
                e.effective_date, e.effective_lo effective_date_lo, e.effective_hi effective_date_hi, e.date_source, e.evidence,
                r.same_code_remaining, r.same_c4_remaining, round(b.base_amt / 1e8, 2) base_amt, nc.n n_products_c4,
@@ -862,7 +862,8 @@ def _render_md(month, prev_month, sig, rates, outc, ev, pc, cr, n_products, dl, 
         L += _table(["제품코드", "제품명", "업체", "성분4", "구분", "유효일", "유효일 근거", "같은 주성분코드 남은 제품", "같은 성분4 남은 제품",
                      "성분4 전체 원외 금액 (억/월)", "제품 1개 몫 (근사, 억/월)"],
                     [[r.product_code, _name(r.product_name), _name(r.firm), r.c4 or "",
-                      DELIST_KIND.get(r.kind, r.kind or ""),
+                      DELIST_KIND.get(r.kind, r.kind or "") + (f" ← {r.counterpart}, 공백 {int(r.gap_months)}개월"
+                                                                 if t == "SUCCESSION" and isinstance(r.counterpart, str) else ""),
                       _d(r.effective_date) or f"{_d(r.effective_date_lo)} ~ {_d(r.effective_date_hi)}",
                       DATE_SOURCE.get(r.date_source, r.date_source or ""), _f(r.same_code_remaining), _f(r.same_c4_remaining),
                       _amt(r.base_amt), _small(r.product_share, 2)]

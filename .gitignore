@@ -4,6 +4,7 @@
 !outputs/validation/sample_60.claude_labeled.csv
 # 새 검증 표본 (라벨용, 원장 판정값 없음, 2026-11-18)
 !outputs/validation/holdout_30.blind.csv
+!outputs/validation/holdout_30.labeled.csv
 *\.pyc
 *\.pyd
 *.DS_Store
