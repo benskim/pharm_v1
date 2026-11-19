@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))
 VAL = ROOT / "outputs/validation"
 
 MAP = {
-    "예고대로 시행": {"REALIZED"},
+    "예고대로 시행": {"REALIZED", "SUSPEND:in_window"},   # 비고 없이 목록에 나타난 급여정지·중지 = 목록 고시가 예고 (2026-11-19)
     "다른 금액·늦게 시행": {"REALIZED_CHANGED", "REALIZED_LATE"},
     "시행 안 됨": {"NOT_REALIZED"},
     "아직 모름": {"CENSORED"},
@@ -26,12 +26,11 @@ MAP = {
     "이어받기(같은 회사)": {"SUCCESSION:recode", "SUCCESSION:swap"},
     "삭제": {"DELISTING:delisting", "DELISTING:delisting_spec", "REALIZED_BY_DELISTING"},
     "해제": {"SUSPEND_LIFT:list_only", "SUSPEND_LIFT:period_end", "SUSPEND_LIFT:r6_note"},
-    "예고 없는 변화": {"PRICE_CHANGE:unobserved_notice"},
+    "비고 미기재 약가 변경": {"PRICE_CHANGE:unobserved_notice"},
     "신규 등재": {"LISTING:new_listing", "LISTING:added_listing"},
     "기타": set(),
 }
-# 확인 필요(사용자): 예고 없이 시작된 급여중지(SUSPEND:in_window)는 정답 범주에 맞는 칸이 없다. 정해질 때까지 어느 범주와도 맞지 않는다.
-UNMAPPED = {"SUSPEND:in_window"}
+# 2026-11-19 사용자 결정: 범주는 추가하지 않는다. 비고 없이 시작된 급여정지·중지(SUSPEND:in_window)는 '예고대로 시행'(목록 고시 원칙, 시행일 그 달 1일)
 
 
 def match(truth_event: str, ledger_value: str) -> bool:

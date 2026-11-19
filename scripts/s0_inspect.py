@@ -11,15 +11,18 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import re
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 RAW = Path("data/raw")
 OUT = Path("outputs/s0")
 
-BENEFIT = "read_parquet('data/raw/benefit/benefit_snapshot_table_*.parquet', union_by_name=true)"
-SUBST = "read_parquet('data/raw/substitute/substitute_snapshot_table_*.parquet', union_by_name=true)"
-USAGE = "read_csv('data/raw/usage/cmpn_stat_*/MEDICINE_*.csv', header=true, all_varchar=true, filename=true)"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from pbd.common import list_files, sql_files, usage_files  # noqa: E402  기본 연도만 (2026-11-19 사용자 결정)
+BENEFIT = f"read_parquet({sql_files(list_files('benefit'))}, union_by_name=true)"
+SUBST = f"read_parquet({sql_files(list_files('substitute'))}, union_by_name=true)"
+USAGE = f"read_csv({sql_files(usage_files())}, header=true, all_varchar=true, filename=true)"
 CODEMAP = "read_parquet('data/raw/master/dim_drug_code_map_26.parquet')"
 DRUGINFO = "read_parquet('data/raw/master/dim_drug_info_26.parquet')"
 ORANGE = "read_parquet('data/raw/orangebook/dim_orange_book.parquet')"
@@ -164,7 +167,7 @@ def snapshot_inventory(con):
 
 # ---------------------------------------------------------------- 2. 사용통계 원본
 def usage_raw(con):
-    files = sorted((RAW / "usage").glob("cmpn_stat_*/MEDICINE_*.csv"))
+    files = [Path(f) for f in usage_files()]
     headers = Counter(f.open(encoding="utf-8").readline().strip() for f in files)
     print(f"\n사용통계 파일 {len(files)}개, 헤더 종류 {len(headers)}")
     for h, n in headers.items():

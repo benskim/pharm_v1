@@ -40,7 +40,7 @@ def test_key_strata_and_mid_month():
         pytest.skip("key 없음")
     k = pd.read_csv(p, dtype=str)
     exp = {"정시 실현": 6, "변경·지연 실현": 4, "급여중지 관련": 4, "양도양수": 2, "코드 변경": 2, "교체 등재": 2,
-           "급여삭제": 3, "중지해제": 2, "예고 미관측 변경": 3, "신규·추가 등재": 2}
+           "급여삭제": 3, "중지해제": 2, "비고 미기재 약가 변경": 3, "신규·추가 등재": 2}
     assert k.groupby("stratum").size().to_dict() == exp
     assert (k["mid"] == "True").sum() >= 8
     old = pd.read_csv(VAL / "holdout_30.key.csv", dtype=str)
@@ -63,3 +63,18 @@ def test_score_refuses_without_run(monkeypatch):
     monkeypatch.setattr("sys.argv", ["x"])
     with pytest.raises(SystemExit):
         S.main()
+
+
+def test_key_matches_blind(blind):
+    """정답 키와 라벨 화면의 대응: 같은 holdout_id에 같은 제품코드·기준월 (2026-11-19 사용자 지시 3)"""
+    p = VAL / "holdout_v53.key.csv"
+    if not p.exists():
+        pytest.skip("key 없음")
+    k = pd.read_csv(p, dtype=str).set_index("holdout_id")[["product_code", "ref_month"]]
+    b = blind.set_index("holdout_id")[["product_code", "ref_month"]]
+    assert k.sort_index().equals(b.sort_index())
+
+
+def test_suspend_without_note_maps_to_existing_category():
+    """범주를 추가하지 않는다: 비고 없이 시작된 급여정지·중지는 '예고대로 시행' (목록 고시 원칙)"""
+    assert S.match("예고대로 시행", "SUSPEND:in_window") and not S.match("기타", "SUSPEND:in_window")

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from pbd.common import AUDIT, RAW, ROOT, connect, load_yaml, qident
+from pbd.common import AUDIT, RAW, ROOT, connect, list_files, load_yaml, qident, sql_files, usage_files
 from pbd.ledger.notes import parse_note
 
 SCHEMA = load_yaml("schema_map.yaml")
@@ -161,7 +161,7 @@ def build_note_token(con) -> None:
 
 
 # ---------------------------------------------------------------- 사용통계
-def build_stg_usage(con, csv_glob: str, sido_merge: dict) -> None:
+def build_stg_usage(con, csv_glob: str | list[str], sido_merge: dict) -> None:
     m = {k: v[0] for k, v in SCHEMA["usage_raw"].items()}
     case = " ".join(f"when '{k}' then '{v}'" for k, v in sido_merge.items())
     q = qident
@@ -181,7 +181,7 @@ def build_stg_usage(con, csv_glob: str, sido_merge: dict) -> None:
                true as observed,
                regexp_extract(filename, 'cmpn_stat_[0-9]{{4}}\\(([^)]*)\\)', 1) as release,
                regexp_extract(filename, '[^/]+$') as src_file
-        from read_csv('{csv_glob}', header=true, all_varchar=true, filename=true)
+        from read_csv({sql_files(csv_glob) if isinstance(csv_glob, list) else repr(csv_glob)}, header=true, all_varchar=true, filename=true)
         order by month, c4, age_band, sex, sido_raw, inst_type, in_out""")
 
 
@@ -295,7 +295,8 @@ def build_attr_2026(con, code_map, drug_info, orange) -> None:
 
 # ---------------------------------------------------------------- 실행
 def raw_files(lst: str) -> list[str]:
-    return sorted(glob.glob(str(RAW / lst / f"{lst}_snapshot_table_*.parquet")))
+    """기본 연도(params data_years.lists, 2022~2025)의 스냅샷 파일만 (2026-11-19 사용자 결정)"""
+    return list_files(lst)
 
 
 def write_csv(path: Path, header, rows) -> None:
@@ -318,7 +319,7 @@ def main() -> None:
     print(f"note_token: {con.execute('select count(*) from note_token').fetchone()[0]:,}개")
     build_snapshot_inventory(con, files, p1["start_month"], p1["end_month"])
     comment_s1(con)
-    build_stg_usage(con, str(RAW / "usage" / "cmpn_stat_*" / "MEDICINE_*.csv"), SCHEMA["sido_merge"])
+    build_stg_usage(con, usage_files(), SCHEMA["sido_merge"])   # 기본 연도 2018~2025만 (2026-11-19 사용자 결정)
     print(f"stg_usage: {con.execute('select count(*) from stg_usage').fetchone()[0]:,}행")
     build_usage_obs(con, p2["start_month"], p2["end_month"])
     build_attr_2026(con, RAW / "master/dim_drug_code_map_26.parquet", RAW / "master/dim_drug_info_26.parquet",

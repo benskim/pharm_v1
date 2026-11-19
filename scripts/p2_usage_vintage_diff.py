@@ -23,12 +23,24 @@ BASE_GLOB = str(ROOT / "data/raw/usage/cmpn_stat_*(2026.10.28.)/MEDICINE_*.csv")
 BASE_PUB = "2026-10-28"
 
 
-def read_out(con, pattern: str) -> pd.DataFrame:
+def read_out(con, pattern: str | list[str]) -> pd.DataFrame:
     """원본 CSV의 원외(OUT) 합: 성분4 × 처방 연월"""
     return con.execute(f"""
         select lpad(WK_COMPN_4, 4, '0') c4, substr(STD_YYYYMM, 1, 4) || '-' || substr(STD_YYYYMM, 5, 2) as month,
                sum(cast(PRSCRPTN_TOT_USE as double)) qty, sum(cast(PRSCRPTN_AMT as double)) amt
-        from read_csv('{pattern}', header = true, all_varchar = true) where OUT_IN_HOS = 'OUT' group by 1, 2""").df()
+        from read_csv({_src(pattern)}, header = true, all_varchar = true) where OUT_IN_HOS = 'OUT' group by 1, 2""").df()
+
+
+def _src(pattern: str | list[str]) -> str:
+    if isinstance(pattern, list):
+        return "[" + ", ".join("'" + f.replace("'", "''") + "'" for f in pattern) + "]"
+    return repr(pattern)
+
+
+def base_files() -> list[str]:
+    """기준 판본(2026-10-28) 원본 중 기본 연도(2018~2025) 파일만. 2026 처방 연도 파일은 고르지 않는다 (2026-11-19 사용자 결정)"""
+    import re
+    return [f for f in sorted(glob.glob(BASE_GLOB)) if (m := re.search(r"MEDICINE_(\d{4})", f)) and int(m.group(1)) <= 2025]
 
 
 def elapsed(month: str, pub: str) -> int:
@@ -87,7 +99,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--new", required=False, default="", help="새 판본 원본 CSV 글롭")
     ap.add_argument("--new-pub", default="", help="새 판본 공개일 YYYY-MM-DD")
-    ap.add_argument("--base", default=BASE_GLOB)
+    ap.add_argument("--base", default=None, help="기준 판본 글롭 (기본: 2026-10-28 판본의 2018~2025 파일)")
     ap.add_argument("--base-pub", default=BASE_PUB)
     a = ap.parse_args()
     if not a.new or not glob.glob(a.new):
@@ -99,7 +111,7 @@ def main() -> None:
     db = ROOT / "data/interim/pbd.duckdb"
     if db.exists():
         cls = duckdb.connect(str(db), read_only=True).execute("select c4, cls from fc_c4_class").df()
-    res = run(a.base, a.base_pub, a.new, a.new_pub, cls, ROOT / "outputs/p2")
+    res = run(a.base or base_files(), a.base_pub, a.new, a.new_pub, cls, ROOT / "outputs/p2")
     print(res["vintage_diff_by_elapsed"].to_string(index=False))
 
 

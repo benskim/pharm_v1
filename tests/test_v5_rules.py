@@ -182,7 +182,7 @@ def test_no_price_event_during_suspension_and_lift_carries_prices():
 
 
 def test_unobserved_notice_change():
-    """예고 없이 바뀐 약가 = 예고 미관측 변경 (sample 28: 2024-10 893 → 2024-11 858, 비고 없음, 유효일 2024-11-01)"""
+    """비고 미기재 약가 변경(비고의 예고와 연결되지 않은 약가 변경) (sample 28: 2024-10 893 → 2024-11 858, 비고 없음, 유효일 2024-11-01)"""
     m = cal("2024-09", "2024-11")
     obs = {"2024-09": B(893), "2024-10": B(893), "2024-11": B(858)}
     st, stays, sigs = run(m, obs)
@@ -191,7 +191,7 @@ def test_unobserved_notice_change():
 
 
 def test_batch_flag_and_stored_counts():
-    """§3 ★·§11-2: 한 달 안에 예고 미관측 변경이 걸친 성분이 50개 이상이면 그달의 예고 미관측 변경을 batch. 판정에 쓰지 않음.
+    """§3 ★·§11-2: 한 달 안에 비고 미기재 약가 변경이 걸친 성분이 50개 이상이면 그달의 비고 미기재 약가 변경을 batch. 판정에 쓰지 않음.
     달마다 n_products·n_ingredients 저장 (2024-11: 287건이지만 성분 13개 → batch 아님)"""
     rows = [dict(key=i, month="2023-09", c4=f"{i:04d}", kind="unobserved_notice") for i in range(50)]
     rows += [dict(key=60, month="2023-09", c4="9999", kind="signaled")]

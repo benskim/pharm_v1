@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import csv
 
-from pbd.common import DB_PATH, RAW, ROOT, connect, load_yaml
+from pbd.common import DB_PATH, RAW, ROOT, connect, load_yaml, sql_files, usage_files
 
 P = load_yaml("params.yaml")["p2"]
 MAIN_CLASSES = (141, 222, 229, 618)
 OUT = ROOT / "outputs/p2"
-RAW_GLOB = str(RAW / "usage" / "cmpn_stat_*" / "MEDICINE_*.csv")
+RAW_GLOB = None   # None = 기본 연도(2018~2025) 원본 파일 목록 (pbd.common.usage_files, 2026-11-19 사용자 결정)
 
 
 def usable_flag(month: str, observed: bool, first_month: str | None, start: str) -> bool:
@@ -89,7 +89,7 @@ def raw_reaggregate(con, glob: str = RAW_GLOB):
     return con.execute(f"""
         select lpad(WK_COMPN_4, 4, '0') c4, substr(STD_YYYYMM, 1, 4) || '-' || substr(STD_YYYYMM, 5, 2) as month,
                sum(cast(PRSCRPTN_TOT_USE as double)) qty, sum(cast(PRSCRPTN_TNDN_CNT as double)) cnt, count(*) n_rows
-        from read_csv('{glob}', header = true, all_varchar = true)
+        from read_csv({sql_files(usage_files()) if glob is None else repr(glob)}, header = true, all_varchar = true)
         where OUT_IN_HOS = 'OUT' group by 1, 2""").df()
 
 

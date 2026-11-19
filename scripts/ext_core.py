@@ -22,7 +22,7 @@ EXTERNAL_FORBIDDEN = ("오라클", "M0", "M2", "M3", "E1", "원장", "신호", "
                       "batch", "지표 A", "지표 B", "P1 사건", "정확히", "완벽", "인과", "영향을 미", "확실히", "약국 재고 최적화",
                       "신호에 정보가 없")
 GLOSSARY = ("**용어** — **급여목록**: 건강보험이 적용되는 약과 상한가격의 공식 목록(매달 새 파일). **비고**: 목록의 메모 칸. 앞으로의 처분(예: \"'25.7.1. 인하\")이 미리 적힌다. "
-            "**변화 기록표**: 월별 목록 파일을 비교해 언제 무엇이 바뀌었는지 날짜별로 정리한 표. **WAPE**: 예측이 빗나간 양의 합 ÷ 실제 처방량의 합(작을수록 좋다). **원외 처방**: 병원 밖 약국에서 조제되는 처방. **급여중지**: 건강보험 적용을 일정 기간 멈추는 처분. **집행정지**: 처분에 소송이 걸렸을 때 법원이 판결 전까지 처분의 효력을 멈추는 결정. "
+            "**변화 기록표**: 월별 목록 파일을 비교해 언제 무엇이 바뀌었는지 날짜별로 정리한 표. **WAPE**: 예측이 빗나간 양의 합 ÷ 실제 처방량의 합(작을수록 좋다). **원외 처방**: 병원 밖 약국에서 조제되는 처방. **급여정지·중지 예정**: 건강보험 적용을 멈추는 처분의 예정(목록 비고에는 '급여정지'로 적힌다. 제재에 따른 급여정지와 허가 관련 급여중지가 섞여 있고 비고로는 나눌 수 없다). **집행정지**: 처분의 취소소송 등을 낸 쪽이 신청하면 법원이 결정으로 정한 기간(흔히 본안 판결 선고 뒤 일정 기간까지) 처분의 효력이나 집행을 멈추는 것. 결정 전에 먼저 멈추는 잠정 집행정지도 있다. **비고 미기재 약가 변경**: 비고의 예고와 연결되지 않은 약가 변경. 급여목록의 변경으로 확인되며 목록 고시 자체가 예고이므로, 변경이 미리 알려지지 않았다는 뜻은 아니다. "
             "**양도양수**: 제품의 허가를 다른 회사가 넘겨받아 같은 약이 새 코드로 다시 실리는 것.")
 
 
@@ -57,7 +57,8 @@ def p1_numbers() -> dict:
     cmp_ = pd.read_csv(ROOT / "outputs/validation/holdout_30.compared_c63778c.csv", dtype=str)
     fixed = cmp_[cmp_.truth_type_initial != cmp_.truth_type]
     assert len(fixed) == 2 and set(fixed.truth_type_initial) == {"신규 등재"} and set(fixed.truth_type) == {"양도양수"}, "'고친 2건은 같은 허가를 이은 경우'와 다르다"
-    disp = dict(sus_units=int(ds.n_units), sus_firms=int(ds.n_firms), sus_units_blocked=int(ds.units_any_blocked), sus_products=int(ds.n_products_judged),
+    disp = dict(sus_units_resolved=int(ds.units_resolved), sus_units_all_realized=int(ds.units_all_realized), price_units_all_realized=int(dp.units_all_realized),
+                sus_A=sus["A"][2], sus_units=int(ds.n_units), sus_firms=int(ds.n_firms), sus_units_blocked=int(ds.units_any_blocked), sus_products=int(ds.n_products_judged),
                 price_units=int(dp.n_units), price_units_blocked=int(dp.units_any_blocked), price_on_time=pr2["on_time"][2], sus_on_time=sus["on_time"][2],
                 price_A_all=prall["A"][2], price_stay_all=prall["stay"][2], price_stay_all_k=prall["stay"][0], price_stay_all_n=prall["stay"][1],
                 price_stay_later=q("""select count(*) from signal_v5 where signal_type = 'PRICE_NOTICE' and stay_blocked
@@ -140,17 +141,21 @@ def texts(P1: dict, P2: dict) -> dict:
     assert P1["sus_units_blocked"] == 3 and P1["price_units_blocked"] == 2
     assert P1["top2"] + 1 == P1["sus_stay_k"]
     assert abs(P1["unannounced"] - 2 / 3) < 0.01
-    one = (f"급여목록에 미리 적힌 약값 인하와 급여중지 처분은 대부분 실현됐고, 법원 집행정지로 막힌 것은 처분 기준으로 소수(급여중지 {P1['sus_units']}건 중 {P1['sus_units_blocked']}건, "
-           f"약값 인하 {P1['price_units']}건 중 {P1['price_units_blocked']}건)였다. 공개 사용통계로 성분 처방량을 예측할 때 기계학습 모델은 작년 같은 달 값과 대체로 비슷했고, "
-           "급여목록의 예고 정보는 예측을 개선하지 못했다.")
-    c1 = [f"1. **급여목록에 미리 적힌 처분은 대부분 실현됐고, 법원 집행정지로 막힌 것은 처분 기준으로 소수였다.**",
-          f"   - 약값 인하: 결과가 난 약값 인하 예고(제품 {P1['price_B_n']:,}개) 중 {pct(P1['price_B'])}가 실현됐다(다른 금액·늦은 시점 포함). 예정일에 예고대로 실현된 것은 {pct(P1['price_on_time'])}다. "
+    assert P1["sus_units_resolved"] == P1["sus_units"] and P1["sus_units"] - P1["sus_units_all_realized"] == P1["sus_units_blocked"], "'실현되지 않은 처분 = 막힌 처분'과 다르다"
+    assert abs((1 - P1["unannounced"]) - 1 / 3) < 0.01, "'약 3분의 1만 미리 알 수 있어'와 다르다"
+    one_p1 = (f"급여목록에 미리 적힌 약값 인하 예고는 대부분 실현됐고, 급여정지·중지 예정이 법원 집행정지로 막힌 경우는 처분 기준으로 소수"
+              f"(급여정지·중지 {P1['sus_units']}건 중 {P1['sus_units_blocked']}건, 약값 인하 {P1['price_units']}건 중 {P1['price_units_blocked']}건)였다.")
+    one_p2 = "공개 사용통계로 성분 처방량을 예측할 때 기계학습 모델은 작년 같은 달 값과 대체로 비슷했고, 급여목록의 예고 정보는 예측을 개선하지 못했다."
+    c1 = ["1. **약값 인하 예고는 대부분 실현됐고, 급여정지·중지 예정이 법원 집행정지로 막힌 경우는 처분 기준으로 소수였다.** "
+          "급여목록 비고의 예고는 이미 발표된 고시를 옮겨 적은 것이라 실현율이 높은 것이 자연스럽다.",
+          f"   - 약값 인하 예고: 결과가 난 제품 {P1['price_B_n']:,}개 중 {pct(P1['price_B'])}가 실현됐다(다른 금액·늦은 시점 포함, 처분 기준 {P1['price_units']}건 중 {P1['price_units_all_realized']}건). 예정일에 예고대로 실현된 것은 {pct(P1['price_on_time'])}다. "
           f"대체조제 목록에만 남은 막힌 처분까지 넣으면 현재까지 실행된 비율은 {pct(P1['price_A_all'])}, 법원 집행정지가 걸린 비율은 {pct(P1['price_stay_all'])}({P1['price_stay_all_k']}/{P1['price_stay_all_n']:,}개 제품, 그중 {P1['price_stay_later']}개는 집행정지가 끝난 뒤 실행)다.",
-          f"   - 급여중지: 급여중지 예고는 처분 {P1['sus_units']}건({P1['sus_firms']}개 회사, 제품 {P1['sus_products']}개)이었고, 그중 {P1['sus_units_blocked']}건(동아에스티 72개 제품, 경보제약 23개, 삼성제약 1개)이 법원 집행정지로 막혔다. "
-          f"제품 수로 세면 {pct(P1['sus_stay'])}지만, 큰 처분 몇 건이 제품 수를 부풀린 값이다. 급여목록 표시만으로 세면 제품 기준 {pct(P1['sus_stay_list'])}이며, 경보제약은 외부 보도로만 확인했다. "
-          f"결과가 난 급여중지 예고 중 예정일에 그대로 시행된 비율은 {pct(P1['sus_on_time'])}이고, 나머지 실현은 늦은 시행과 삭제다.",
-          f"   - 예고 없는 변화: 가격이 바뀐 제품의 {pct(P1['unannounced'])}({P1['unannounced_n']:,}/{P1['n_price_events']:,})는 급여목록 비고에 미리 적히지 않았다. 이 가운데 {pct(P1['batch_share'])}는 일괄 인하가 있었던 3개 달이고, "
-          f"2023-09 제네릭 재평가 한 번이 {P1['m2309']:,}건이다. 이 재평가는 목록 밖에서 미리 보도됐다. 일괄 인하 3개 달을 빼면 {pct(P1['unannounced_rest'])}다."]
+          f"   - 급여정지·중지 예정: 처분 {P1['sus_units']}건({P1['sus_firms']}개 회사, 제품 {P1['sus_products']}개) 가운데 결과가 난 제품 전부가 실현된 처분은 {P1['sus_units_all_realized']}건({pct(P1['sus_units_all_realized'] / P1['sus_units_resolved'])})이다(실현에는 늦은 시행과 삭제 포함). "
+          f"나머지 {P1['sus_units_blocked']}건은 법원 집행정지로 막혔다(동아에스티 72개 제품, 경보제약 23개, 삼성제약 1개, 비고 표기는 셋 다 '급여정지'). "
+          f"제품 기준으로는 현재 실현율 {pct(P1['sus_A'])}, 결과가 난 것 중 예정일에 그대로 시행된 비율 {pct(P1['sus_on_time'])}다. "
+          f"막힌 제품 비율 {pct(P1['sus_stay'])}는 큰 처분 몇 건의 제품 수가 좌우한 값이다(급여목록 표시만으로 세면 {pct(P1['sus_stay_list'])}, 경보제약은 외부 보도로만 확인).",
+          f"   - 비고 미기재 약가 변경: 가격이 바뀐 제품의 {pct(P1['unannounced'])}(제품 단위 약가 변경 {P1['unannounced_n']:,}/{P1['n_price_events']:,}건)는 비고에 따로 적히지 않았고, 목록 고시로 시행됐다(시행일은 비고에 같은 금액과 함께 적힌 지난 날짜, 없으면 그 달 1일). "
+          f"이 가운데 {pct(P1['batch_share'])}는 일괄 인하가 있었던 3개 달이고, 2023-09 제네릭 재평가 한 번이 {P1['m2309']:,}건이다. 일괄 인하 3개 달을 빼면 {pct(P1['unannounced_rest'])}다."]
     c2 = ["2. **기계학습 모델은 작년 같은 달 값과 대체로 비슷했고, 이례적인 기간에 덜 빗나갔다.**",
           f"   - 미리 정한 주 대상(호흡기 계열 32개)에서는, 사용통계가 5개월 늦게 공개된다고 두고 마지막 자료에서 6개월 앞을 예측하면 모델이 작년 같은 달 값보다 나빴다(WAPE {pct(e.loc[('M2', 5), 'wape'])} 대 {pct(e.loc[('M0', 5), 'wape'])}).",
           f"   - 결과를 본 뒤 원래 계획 범위로 넓힌 상위 200개에서는 모델이 조금 나았다({pct(t2.loc[('M2', 5), 'wape'])} 대 {pct(t2.loc[('M0', 5), 'wape'])}, 청구금액 가중 {pct(t2.loc[('M2', 5), 'wape_amt'])} 대 {pct(t2.loc[('M0', 5), 'wape_amt'])}). "
@@ -165,15 +170,17 @@ def texts(P1: dict, P2: dict) -> dict:
           "실제로 일어난 변화를 미리 넣은 시험은 성분 32개에서만 했고, 거기서도 나아지지 않았다. "
           f"일부러 넣은 {inj_k}% 효과도 일부만 찾을 만큼 검출력이 낮아 '효과가 없다'고는 말하지 않는다. "
           "처방량이 상한금액에 둔감해서인지, 성분 안에서 제품이 바뀌어서인지는 성분 단위 자료로 구분할 수 없다. "
-          f"가격을 미리 알 때 줄일 수 있는 오차의 상한은 금액 변화 분해로 근사하면 약 {ceil}%(성분 32개 기준)다. 대상은 업체가 3곳 이상인 성분(공개 기준)이다."]
-    mean = ["- 급여목록의 처분 예고는 처분 기준으로 대부분 실현됐다. 약국 알림에 쓸 수 있고, 급여중지는 법원에서 막힐 수 있다는 표시를 함께 두는 것이 맞다(시험하지 않은 제안).",
+          f"가격을 미리 알 때 줄일 수 있는 오차의 상한은 금액 변화 분해로 근사하면 약 {ceil}%(성분 32개 기준)다. 대상은 사용통계에 공개된 성분이다(품목 수 또는 업체 수가 2개 이하인 성분은 비공개, 목록의 업체 수와 공개 여부가 다른 성분·월도 있다)."]
+    mean_p1 = ["- 급여목록의 처분 예고는 처분 기준으로 대부분 실현됐다. 약국 알림에 쓸 수 있고, 급여정지·중지 예정에는 법원에서 막힐 수 있다는 표시를 함께 두는 것이 맞다(시험하지 않은 제안).",
+               "- 비고만으로는 가격 변경의 약 3분의 1만 미리 알 수 있어, 약국 알림에는 매달 목록 비교가 함께 필요하다."]
+    mean = [*mean_p1,
             "- 공개 통계 기반 예측은 평상시에는 작년 같은 달 값과 비슷했고, 코로나 회복기처럼 이례적인 기간에 덜 빗나갔다. 바로 쌓이는 약국 주문·판매 자료가 예측을 더 낫게 할지는 검증하지 않은 가정이다.",
             "- 급여목록 예고 정보는 성분 전체 수요 예측보다 가격·재고 위험 알림에 맞는 정보다(시험하지 않은 제안)."]
     prec = (f"규칙을 고치기 전 판정 엔진(v5.2)을 사람 정답 {P1['hold_n']}건(판정 유형별 3건씩, 작성자 1인)과 맞춰 보면 유형 일치는 {pct(P1['hold_init'])}였다. "
             f"불일치 건만 다시 보고 2건을 고치면 {pct(P1['hold_after'])}다(고친 2건은 같은 허가를 이은 경우로, 급여 사건으로는 신규 등재로 볼 여지도 있다). "
             "이 불일치를 보고 규칙을 고친 v5.3의 정밀도는 별도 검증 표본으로 잰다. 유형별 같은 수로 뽑아 모집단 정밀도가 아니며 놓친 사건(재현율)은 재지 않았다. "
             "날짜 일치는 대부분 '그 달 1일' 관례가 양쪽에 같이 적용된 결과라 날짜 판정의 검증으로 보지 않는다.")
-    return dict(one=one, c1=c1, c2=c2, c3=c3, mean=mean, prec=prec)
+    return dict(one=one_p1 + " " + one_p2, one_p1=one_p1, c1=c1, c2=c2, c3=c3, mean=mean, mean_p1=mean_p1, prec=prec)
 
 
 def core(P1: dict, P2: dict, which: str = "all") -> list[str]:

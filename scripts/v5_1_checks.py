@@ -1,5 +1,5 @@
 """v5.1 점검표 (사용자 지시 2026-11-18, RULES §11-2·3·7). 읽기 전용. 출력 outputs/v5/check_*.csv
-1. batch 경계 사례: 2022-09·2024-05·2024-08·2024-11의 n_products·n_ingredients (예고 미관측 변경만, batch_month_v5)
+1. batch 경계 사례: 2022-09·2024-05·2024-08·2024-11의 n_products·n_ingredients (비고 미기재 약가 변경만, batch_month_v5)
 2. 업체명이 원문 그대로 같은데 양도양수로 잡힌 쌍 (옛 코드 마지막 달 업체명 = 새 코드 첫 달 업체명, stg_benefit 원문)
 3. v4의 코드 변경(TRANSFER same_item_recode) 338건이 v5에서 무엇이 됐나 (v4 보관본)
 4. 집행정지로 막힌 약가 예고가 집행정지 중 삭제된 건(stay_then_delisted) 목록: 제품코드, 제품명, 최초 기재월, 집행정지 날짜, 마지막 등재월,
@@ -35,7 +35,7 @@ def main() -> None:
                          where event_type = 'PRICE_CHANGE' group by 1""").df()
     b = b.merge(allpc, on="observed_month", how="left")
     b.to_csv(OUT / "check_batch_months.csv", index=False)
-    print("== batch 경계 (예고 미관측 변경만 / 참고: 모든 약가 변경)\n", b.to_string(index=False))
+    print("== batch 경계 (비고 미기재 약가 변경만 / 참고: 모든 약가 변경)\n", b.to_string(index=False))
 
     firm = c.execute("""with f as (select product_code, arg_min(firm, list_month) firm_first, arg_max(firm, list_month) firm_last
                                    from stg_benefit where row_kind = 'product_candidate' group by 1)

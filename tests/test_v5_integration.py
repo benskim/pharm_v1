@@ -203,7 +203,7 @@ def test_batch_month_counts_stored(con):
     r = ev(con, "select n_products, n_ingredients, batch from batch_month_v5 where observed_month = '2024-11'")
     assert r == [(287, 13, False)]
     assert ev(con, "select count(*) from batch_month_v5 where batch <> (n_ingredients >= min_c4)") == [(0,)]
-    # batch는 예고 미관측 변경에만
+    # batch는 비고 미기재 약가 변경에만
     assert ev(con, "select count(*) from event_ledger_v5 where event_type = 'PRICE_CHANGE' and kind = 'signaled' and batch") == [(0,)]
 
 

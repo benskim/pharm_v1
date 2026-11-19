@@ -112,7 +112,7 @@ def claim_v4(c, rid: str, rtype: str):
         return "NONE", ""
     et, k, e, lo, hi, ds = r
     t = V4_EVENT_KIND.get((et, k), f"{et}|{k}")
-    if (et, k) == ("PRICE_CHANGE", "stay_released"):     # RULES §3: 예고와 연결되면 그 신호의 실현, 아니면 예고 미관측 변경
+    if (et, k) == ("PRICE_CHANGE", "stay_released"):     # RULES §3: 예고와 연결되면 그 신호의 실현, 아니면 비고 미기재 약가 변경
         sid = c.execute("select signal_id from event_ledger where event_id = ?", [rid]).fetchone()[0]
         t = "PRICE_CHANGE|signaled" if sid else "PRICE_CHANGE|unobserved_notice"
     d = f"{iso(lo)}~{iso(hi)}" if ds == "interval" else iso(e)

@@ -3,7 +3,7 @@
 - v5.3 원장(signal_v5, ev_v5)에서 층마다 md5(seed || 기록 id) 순으로 뽑는다. 시드는 config/params.yaml `seed`.
 - 기존 holdout_30·sample_60 제품(그리고 이어받기 상대 코드)은 뺀다. 한 제품은 한 번만.
 - 층(합 30): 정시 실현 6, 변경·지연 실현 4, 급여중지 관련 4, 양도양수·코드 변경·교체 등재 6(종류별 2), 급여삭제 3, 중지해제 2,
-  예고 미관측 변경 3, 신규·추가 등재 2.
+  비고 미기재 약가 변경 3, 신규·추가 등재 2. (층 '급여중지 관련'은 key 값이라 그대로, 문서 표기는 급여정지·중지 관련)
 - 월중 날짜 최소 8건: 기준월 전후 3개월 두 목록의 비고에 1일이 아닌 날짜가 있는 행. 먼저 층마다 md5 순으로 뽑고, 8건이 안 되면
   층 순서대로 각 층에서 md5 순 마지막의 월중 날짜가 아닌 행을, 그 층에서 아직 안 뽑힌 md5 순 첫 월중 날짜 행으로 바꾼다(결정론적).
 - 라벨 화면(holdout_v53.blind.csv)에는 원장 판정값과 규칙 용어를 넣지 않는다. 넣는 것: 제품코드, 기준월, 볼 것(평이한 말),
@@ -28,7 +28,7 @@ WIN = 3
 MID_MIN = 30 - 22   # 최소 8건
 TRUTH = ("truth_event", "truth_date", "truth_note")
 EVENTS = ("예고대로 시행", "다른 금액·늦게 시행", "시행 안 됨", "아직 모름", "이어받기(다른 회사)", "이어받기(같은 회사)",
-          "삭제", "해제", "예고 없는 변화", "신규 등재", "기타")
+          "삭제", "해제", "비고 미기재 약가 변경", "신규 등재", "기타")
 # (층 이름, 뽑을 수, [(기록 종류, 조건), ...]) — 조건이 여럿이면 한 목록으로 합쳐 md5 순
 STRATA = [
     ("정시 실현", 6, [("signal", "outcome = 'REALIZED'")]),
@@ -39,7 +39,7 @@ STRATA = [
     ("교체 등재", 2, [("event", "event_type = 'SUCCESSION' and kind = 'swap'")]),
     ("급여삭제", 3, [("event", "event_type = 'DELISTING' and kind = 'delisting'")]),
     ("중지해제", 2, [("event", "event_type = 'SUSPEND_LIFT'")]),
-    ("예고 미관측 변경", 3, [("event", "event_type = 'PRICE_CHANGE' and kind = 'unobserved_notice'")]),
+    ("비고 미기재 약가 변경", 3, [("event", "event_type = 'PRICE_CHANGE' and kind = 'unobserved_notice'")]),
     ("신규·추가 등재", 2, [("event", "event_type = 'LISTING' and kind in ('new_listing', 'added_listing')")]),
 ]
 assert sum(n for _, n, _ in STRATA) == 30
@@ -163,6 +163,35 @@ def build(con, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     return pd.DataFrame(blind), p
 
 
+def write_xlsx(blind: pd.DataFrame, path: Path) -> None:
+    """라벨용 엑셀: 모든 칸을 문자열로(제품코드 앞 0 유지), truth_event는 범주 목록에서 고르게"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+    from openpyxl.worksheet.datavalidation import DataValidation
+    wb = Workbook(); ws = wb.active; ws.title = "label"
+    ws.append(list(blind.columns))
+    for r in blind.itertuples(index=False):
+        ws.append(list(r))
+    for row in ws.iter_rows():
+        for c in row:
+            c.number_format = "@"; c.alignment = Alignment(wrap_text=True, vertical="top")
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    width = dict(holdout_id=6, product_code=12, ref_month=9, look_at=40, benefit_window=80, substitute_window=60, same_item_codes=40,
+                 same_ingredient_candidates=40, truth_event=22, truth_date=12, truth_note=40)
+    for i, col in enumerate(blind.columns, 1):
+        ws.column_dimensions[ws.cell(1, i).column_letter].width = width.get(col, 20)
+    ws.freeze_panes = "D2"
+    lst = wb.create_sheet("범주")
+    for x in EVENTS:
+        lst.append([x])
+    col = ws.cell(1, list(blind.columns).index("truth_event") + 1).column_letter
+    dv = DataValidation(type="list", formula1=f"=범주!$A$1:$A${len(EVENTS)}", allow_blank=True)
+    ws.add_data_validation(dv)
+    dv.add(f"{col}2:{col}{len(blind) + 1}")
+    wb.save(path)
+
+
 def main() -> None:
     seed = yaml.safe_load((ROOT / "config/params.yaml").read_text(encoding="utf-8"))["seed"]
     if BLIND.exists():
@@ -173,6 +202,7 @@ def main() -> None:
     blind, key = build(con, seed)
     blind.to_csv(BLIND, index=False, encoding="utf-8")
     key.to_csv(KEY, index=False, encoding="utf-8")
+    write_xlsx(blind, VAL / "holdout_v53.label.xlsx")
     print(f"{BLIND.relative_to(ROOT)} {len(blind)}행 (월중 날짜 {int(key['mid'].sum())}행). 층별 수는 key에만 있다.")
 
 

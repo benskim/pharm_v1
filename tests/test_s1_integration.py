@@ -10,7 +10,7 @@ import re
 import duckdb
 import pytest
 
-from pbd.common import DB_PATH, RAW, ROOT
+from pbd.common import DB_PATH, RAW, ROOT, list_files, sql_files, usage_files
 
 pytestmark = pytest.mark.skipif(not DB_PATH.exists(), reason="pbd.duckdb 없음 (make p1-s1)")
 
@@ -33,12 +33,12 @@ def raw_count(sql_src):
 
 @pytest.mark.parametrize("lst", ["benefit", "substitute"])
 def test_raw_rows_equal_stg_rows(con, lst):
-    src = f"read_parquet('{(RAW / lst).as_posix()}/{lst}_snapshot_table_*.parquet', union_by_name=true)"
+    src = f"read_parquet({sql_files(list_files(lst))}, union_by_name=true)"
     assert con.execute(f"select count(*) from stg_{lst}").fetchone()[0] == raw_count(src)
 
 
 def test_usage_rows_equal_raw(con):
-    src = f"read_csv('{(RAW / 'usage').as_posix()}/cmpn_stat_*/MEDICINE_*.csv', header=true, all_varchar=true)"
+    src = f"read_csv({sql_files(usage_files())}, header=true, all_varchar=true)"   # 기본 연도 2018~2025 파일만 (2026-11-19)
     assert con.execute("select count(*) from stg_usage").fetchone()[0] == raw_count(src)
 
 
@@ -54,7 +54,7 @@ def test_codes_and_keys(con, lst):
 @pytest.mark.parametrize("lst", ["benefit", "substitute"])
 def test_row_kind_counts_match_raw(con, lst):
     """non_product 행 수 = 원본에서 숫자 8·9자리가 아닌 제품코드 행 수 (원본을 직접 센다)."""
-    src = f"read_parquet('{(RAW / lst).as_posix()}/{lst}_snapshot_table_*.parquet', union_by_name=true)"
+    src = f"read_parquet({sql_files(list_files(lst))}, union_by_name=true)"
     want = raw_count(f"(select * from {src} where not regexp_full_match(coalesce(trim(제품코드), ''), '[0-9]{{8,9}}'))")
     got = con.execute(f"select count(*) from stg_{lst} where row_kind = 'non_product'").fetchone()[0]
     assert got == want

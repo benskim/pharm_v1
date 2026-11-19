@@ -6,6 +6,12 @@ seed: 20261114
 # data/raw 사용통계(2018~2025)는 2026-11-01에 받은 수정본이다. 폴더명 날짜는 그 판의 공개일일 뿐이다 (DECISIONS 2026-11-16).
 usage_lag_months: &usage_lag 5
 
+# 기본으로 읽는 원본 연도 (2026-11-19 사용자 결정). 로더·시험은 이 범위의 파일만 읽는다.
+# 2026 자료는 p2v2-prereg 태그 뒤 Stage 4 명령에서만 연도를 넘겨 읽는다 (pbd.common.usage_files / list_files).
+data_years:
+  usage: [2018, 2025]
+  lists: [2022, 2025]
+
 p1:
   start_month: "2022-01"
   end_month: "2025-12"

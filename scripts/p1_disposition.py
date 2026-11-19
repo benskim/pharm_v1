@@ -5,7 +5,7 @@
 외부 근거로 넣은 집행정지(경보제약 23개 제품)는 이 키로 처분 1건이 되는지 확인한다(assert).
 
 출력 outputs/v5/disposition_units.csv (처분 단위 표), outputs/v5/disposition_summary.csv (요약).
-제품 단위 정시 실현율(v5.3)과 예고 미관측 약가 변화의 일괄 인하 달 몫도 같이 낸다.
+제품 단위 정시 실현율(v5.3)과 비고 미기재 약가 변경의 일괄 인하 달 몫도 같이 낸다.
 금액 기준 비중은 계산하지 않는다: 제품별 판매량(처방량)이 데이터에 없다.
 사용: python -I scripts/p1_disposition.py
 """
@@ -71,11 +71,15 @@ def main() -> None:
         rows.append(dict(kind=name, n_products_judged=int(x["n_judged"].sum()), n_units=len(x), n_firms=x["firm"].nunique(),
                          units_any_blocked=int(x["any_blocked"].sum()), units_all_blocked=int(x["all_blocked"].sum()),
                          firms_blocked=x.loc[x["any_blocked"], "firm"].nunique(),
+                         # 처분 단위 실현율 (2026-11-19): 결과가 난 제품이 있는 처분 중, 결과가 난 제품이 모두 실현 계열인 처분
+                         units_resolved=int((x["n_resolved"] > 0).sum()),
+                         units_all_realized=int(((x["n_resolved"] > 0) & (x["n_realized_family"] == x["n_resolved"])).sum()),
+                         units_all_on_time=int(((x["n_resolved"] > 0) & (x["n_on_time"] == x["n_resolved"])).sum()),
                          products_blocked=int(x["n_blocked"].sum()), max_unit_products=int(x["n_products"].max()),
                          product_on_time_k=r["on_time"][0], product_on_time_n=r["on_time"][1], product_on_time=r["on_time"][2],
                          product_B=r["B"][2], product_stay=r["stay"][2]))
     sm = pd.DataFrame(rows)
-    # 예고 미관측 약가 변화 가운데 일괄 인하 달의 몫 (제품 수 기준)
+    # 비고 미기재 약가 변경 가운데 일괄 인하 달의 몫 (제품 수 기준)
     u_all, u_batch = con.execute("""select count(*), count(*) filter (where batch) from ev_v5
                                     where event_type = 'PRICE_CHANGE' and kind = 'unobserved_notice'""").fetchone()
     m2309 = con.execute("""select count(*) from ev_v5 where event_type = 'PRICE_CHANGE' and kind = 'unobserved_notice'

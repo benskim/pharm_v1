@@ -253,7 +253,7 @@ def build(con) -> dict:
         else:
             e = Event("LISTING", en.kind, m, effective_date=base(m), date_source="snapshot_first", known_month=m, link_basis=en.link_basis)
         add(pc, e)
-    # batch (§3 ★·§11-2): 그달 예고 미관측 변경의 성분4 수. 판정에 쓰지 않는 설명용 표시, 달마다 n_products·n_ingredients 저장
+    # batch (§3 ★·§11-2): 그달 비고 미기재 약가 변경의 성분4 수. 판정에 쓰지 않는 설명용 표시, 달마다 n_products·n_ingredients 저장
     p1 = PARAMS["p1"]
     flagged, bstats = flag_batch([dict(key=r["event_id"], month=r["observed_month"], c4=r["market_c4"], kind=r["kind"]) for r in price_rows],
                                  p1.get("batch_min_c4", 50), p1.get("batch_min_products", 0))

@@ -28,3 +28,6 @@ outputs/precheck_sample.md
 !outputs/validation/holdout_precision_c63778c.csv
 !outputs/validation/holdout_precision_v5_3.csv
 !outputs/v5/metrics_c63778c.csv
+
+# 2026 자료 임시 보관 (p2v2-prereg 태그 전까지 열지 않음, 2026-11-19). 형식과 관계없이 저장소에 넣지 않는다
+data/temp/

@@ -257,7 +257,7 @@ HOLDOUT_STRATA = [   # (층 이름, 기록 종류, 조건)
     ("변경 실현", "signal", "outcome = 'REALIZED_CHANGED'"),
     ("미실현", "signal", "outcome = 'NOT_REALIZED'"),
     ("미결", "signal", "outcome = 'CENSORED'"),
-    ("예고 미관측 변경", "event", "event_type = 'PRICE_CHANGE' and kind = 'unobserved_notice'"),
+    ("예고 미관측 변경", "event", "event_type = 'PRICE_CHANGE' and kind = 'unobserved_notice'"),   # 층 이름은 holdout_30 결과 파일 값이라 그대로 둔다. 문서 표기: 비고 미기재 약가 변경 (DECISIONS 2026-11-19)
 ]
 HOLDOUT_PER = 3
 BLIND_NAME, KEY_NAME = "holdout_30.blind.csv", "holdout_30.key.csv"

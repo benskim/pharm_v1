@@ -675,7 +675,7 @@ def derive_signals(code: str, months: list[str], obs: dict, status: StatusResult
 
 # ---------------------------------------------------------------- 약가 이벤트 (§3)
 def price_events(code: str, months: list[str], obs: dict, status: StatusResult, signals: list[Signal]) -> list[Event]:
-    """전후 두 달 모두 급여 상태(revised)일 때만 약가 변경. 실현된 약가 신호와 연결되면 signaled, 아니면 예고 미관측 변경"""
+    """전후 두 달 모두 급여 상태(revised)일 때만 약가 변경. 실현된 약가 신호와 연결되면 signaled, 아니면 비고 미기재 약가 변경"""
     out = []
     linked = {s.realized_month: s for s in signals
               if s.signal_type in ("PRICE_NOTICE", "STAY_RELEASE_PRICE") and s.outcome in ("REALIZED", "REALIZED_CHANGED", "REALIZED_LATE")
@@ -707,8 +707,8 @@ def price_events(code: str, months: list[str], obs: dict, status: StatusResult, 
 
 
 def flag_batch(rows: list[dict], min_c4: int, min_products: int = 0) -> tuple[set, dict]:
-    """§3 ★·§11-2. rows: {key, month, c4, kind}. 한 달 안의 예고 미관측 변경(kind = unobserved_notice)이 걸친 성분4가 min_c4개 이상이면
-    그달의 예고 미관측 변경을 batch. 판정에 쓰지 않는 설명용 표시. 반환: (batch 키, {달: n_products, n_ingredients, batch})"""
+    """§3 ★·§11-2. rows: {key, month, c4, kind}. 한 달 안의 비고 미기재 약가 변경(kind = unobserved_notice)이 걸친 성분4가 min_c4개 이상이면
+    그달의 비고 미기재 약가 변경을 batch. 판정에 쓰지 않는 설명용 표시. 반환: (batch 키, {달: n_products, n_ingredients, batch})"""
     groups: dict[str, list[dict]] = {}
     for r in rows:
         if r["kind"] == "unobserved_notice":
