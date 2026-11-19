@@ -372,3 +372,4 @@
 | 2026-11-19 (**사용자 결정**) | 제출 준비: s1-load와 p2-min을 release 브랜치로 합치고, 깨끗한 클론 재현(make all → make test, 주요 숫자 자동 대조) 뒤 태그 v1.0. push하지 않음 | | |
 | 2026-11-19 | `make all`에 P2 최소판을 넣는다: all = P1 단계 → `p2-min` → `test`. P2 시험 일부(as-of 끝-끝 시험)는 `fc_panel`이 있어야 돌아가므로 깨끗한 클론에서 `make all` 한 번으로 재현되게 한다 | 재현 지시(make all → make test) | P2를 따로 실행 |
 | 2026-11-19 | 깨끗한 클론 재현에 필요한 고정 기록 5개를 저장소에 넣는다: `outputs/validation/holdout_30.key.csv`(라벨이 끝나 가릴 필요가 없어짐), `holdout_30.compared_c63778c.csv`, `holdout_precision_c63778c.csv`, `holdout_precision_v5_3.csv`, `outputs/v5/metrics_c63778c.csv`(과거 원장 c63778c 기준 값이라 지금 코드로 다시 만들 수 없음) | 재현 지시. 정밀도 두 줄 보고(2026-11-18)의 근거 파일 | 문서에서 이 숫자를 빼기 |
+| 2026-11-19 (재현 중 발견) | `requirements.txt`를 작업 환경 판으로 고정하고, 쓰지 않는 `statsforecast`·`holidays`를 뺀다(M1 ETS는 최소판 범위 밖이라 코드에 없음). 고정하지 않은 판으로 새로 설치하면 `statsforecast`가 끌어오는 `libcst`가 Rust 컴파일러를 요구해 설치가 실패했다. numpy·scipy는 코드가 직접 쓰므로 명시 | 깨끗한 클론 `make venv` 실패 로그 | 판 범위만 적기 |
