@@ -10,7 +10,7 @@ help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
 
 venv:
-	python3.11 -m venv .venv && $(PY) -m pip install -r requirements.txt
+	python3.11 -m venv .venv && $(PY) -m pip install --upgrade pip && $(PY) -m pip install -r requirements.txt
 
 # 회귀 시험용 표본 (data/raw → data/sample)
 sample:
