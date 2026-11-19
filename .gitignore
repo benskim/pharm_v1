@@ -5,6 +5,8 @@
 # 새 검증 표본 (라벨용, 원장 판정값 없음, 2026-11-18)
 !outputs/validation/holdout_30.blind.csv
 !outputs/validation/holdout_30.labeled.csv
+# v5.3 새 검증 표본 라벨 화면 (2026-11-19). key는 git에서 뺀다
+!outputs/validation/holdout_v53.blind.csv
 *\.pyc
 *\.pyd
 *.DS_Store

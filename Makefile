@@ -4,7 +4,7 @@ export PYTHONPATH := src
 
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
-        p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 p1-build all
+        p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 p1-build all p1-holdout-v53
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -125,9 +125,16 @@ p2-extra:
 	$(PY) -m pbd.forecast.extra_horizon top200
 	$(PY) -m pbd.forecast.extra_signif
 	$(PY) -m pbd.forecast.extra_window
+	$(PY) -m pbd.forecast.extra_recent
+	$(PY) -m pbd.forecast.extra_2023h1
+
+# v5.3 새 검증 표본 라벨 화면 (한 번만. 정답이 채워지면 덮어쓰지 않는다). 채점은 라벨을 마친 뒤 scripts/holdout_v53_score.py --run
+p1-holdout-v53:
+	$(PY) -I scripts/holdout_v53.py
 
 # P2 T5 문서 (결과 보고서 → 2쪽 요약·README·PLAN §8 → P1 요약의 P2 행)
 p2-t5:
+	$(PY) -I scripts/p1_disposition.py
 	$(PY) -I scripts/p2_min_report.py
 	$(PY) -I scripts/p2_docs.py
 	$(PY) -I scripts/p1_docs.py
