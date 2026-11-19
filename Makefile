@@ -4,7 +4,7 @@ export PYTHONPATH := src
 
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
-        p2-t1 p2-t2 p2-t3 p2-diag p2-min p2-t4 p2-t5 all
+        p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 all
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -115,13 +115,21 @@ p2-diag:
 	$(PY) -I scripts/p2_diag_oracle_offset.py claim_amt
 	$(PY) -I scripts/p2_check_oracle_features.py
 
+# P2 추가 확인 A~D (2026-11-19, 주 결과·결론 문장과 따로): 사후 수정 간접 시험, 1~12개월 앞, 상위 200, 층화 200, 청구금액 가중 WAPE
+p2-extra:
+	$(PY) -m pbd.forecast.extra_revision
+	$(PY) -m pbd.forecast.extra_weight
+	$(PY) -m pbd.forecast.extra_horizon
+	$(PY) -m pbd.forecast.extra_top200 top200
+	$(PY) -m pbd.forecast.extra_top200 strat200
+
 # P2 T5 문서 (결과 보고서 → 2쪽 요약·README·PLAN §8 → P1 요약의 P2 행)
 p2-t5:
 	$(PY) -I scripts/p2_min_report.py
 	$(PY) -I scripts/p2_docs.py
 	$(PY) -I scripts/p1_docs.py
 
-p2-min: p2-t1 p2-t2 p2-t3 p2-diag p2-t5
+p2-min: p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-t5
 
 p2-t4:
 	$(TODO)
