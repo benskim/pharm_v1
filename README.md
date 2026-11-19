@@ -65,13 +65,13 @@ make p2-min                    # P2: 예측용 자료 → 기준 예측 → 모�
 make report MONTH=2024-09      # 한 달 리포트 → outputs/reports/P1_report_2024-09.md, outputs/dashboard/2024-09/
 make test                      # 전체 자동 시험
 ```
-깨끗한 클론 재현 기록은 이전 판정 규칙 시점(2026-11-16)의 것이고, 현재 규칙으로는 다시 하지 않았다 ([docs/REPRODUCE_LOG.md](docs/REPRODUCE_LOG.md)). 이전 규칙의 결과는 `outputs/v4_legacy/`에 읽기 전용으로 있다. P2는 `make p2-min`으로 따로 돌린다(`all`에 넣지 않았다). 사용자가 정답을 단 검증 표본(`outputs/validation/`)은 저장소에 있고 실행이 덮어쓰지 않는다.
+깨끗한 클론 재현(2026-11-19, 현재 규칙): 새 가상환경에서 `make all` 3시간 23분, 시험 364개 모두 통과, 주요 숫자·문서 37개가 커밋된 결과와 같다 ([reports/REPRODUCTION.md](reports/REPRODUCTION.md)). 이전 판정 규칙 시점의 기록은 [docs/REPRODUCE_LOG.md](docs/REPRODUCE_LOG.md), 그 결과는 `outputs/v4_legacy/`에 읽기 전용으로 있다. `make all`은 P2(`make p2-min`)까지 돈다. 사용자가 정답을 단 검증 표본(`outputs/validation/`)은 저장소에 있고 실행이 덮어쓰지 않는다.
 
 ## 예시 리포트
 - [2024-09](outputs/reports/P1_report_2024-09.md): 시타글립틴 인하 예고, 아픽사반 등재 예고
 - [2025-11](outputs/reports/P1_report_2025-11.md): 토파시티닙 등재 예고, 11월 정기 정비 삭제 611건
 
-리포트는 발간 달까지의 목록과 5개월 전까지의 사용통계만 쓴다. 같은 입력이면 같은 파일이 나오는지는 이전 판정 규칙 시점의 재현 기록에서 확인했다.
+리포트는 발간 달까지의 목록과 5개월 전까지의 사용통계만 쓴다. 같은 입력이면 같은 파일이 나오는지는 2026-11-19 깨끗한 재현에서 확인했다.
 
 ## 문서 지도
 | 문서 | 내용 |

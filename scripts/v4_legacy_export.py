@@ -84,13 +84,14 @@ def main(force: bool = False) -> None:
             c.execute(f"create table {t} as select * from src.{t}")
         S2.build_all(c)
         S3.build_all(c)
-        out.execute("attach ':memory:' as x")
+        # pandas를 거치면 DATE 칸이 TIMESTAMP가 된다 (깨끗한 재현 2026-11-19에서 발견). DuckDB끼리 바로 옮긴다
+        out.close()
+        c.execute(f"attach '{LEG_DB.as_posix()}' as dst")
         for t in V4_TABLES:
-            df = c.execute(f"select * from {t}").df()
-            out.register("_d", df)
-            out.execute(f"create table {t} as select * from _d")
-            out.unregister("_d")
+            c.execute(f"create table dst.{t} as select * from {t}")
+        c.execute("detach dst")
         c.close()
+        out = duckdb.connect(str(LEG_DB))
         how = "L1 표로 S2·S3(v4)를 다시 만듦"
     add_comments(out)
     for t in V4_TABLES:
