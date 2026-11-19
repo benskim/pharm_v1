@@ -71,9 +71,9 @@ def extra_checks(w, src, pct) -> None:
         w(f"| {x.unit} | {x.units} | {100 * x.median_drop:+.1f}% | {pct(x.share_negative)} | **{x.verdict}** |")
     w(f"\n![작년 같은 달 대비 비율](figures/p2_revision_ratio.png)\n\n{src('extra_revision_verdict.csv', 'extra_revision_by_k.csv')}. "
       "**이 방법으로는 수정 폭이 −5%를 넘는다는 증거를 찾지 못했다**(표의 판정 칸은 실행 전 기준의 이름). 하락 방향은 단위의 다수에서 보였다. 이 비교는 실제 수요 감소와 덜 집계를 구분하지 못한다. "
-      "남은 측정 과제: 수정 폭과 안정 기간. 사용 파일의 '심사완료분 반영 시점'을 알면 각 달의 경과 개월을 그것으로 다시 계산한다.\n")
-    w("**c. 직접 비교 준비**: `scripts/p2_usage_vintage_diff.py`(합성 자료 시험 `tests/test_p2_vintage_diff.py`). 같은 달의 두 판본을 성분 × 월·약효분류군 × 월로 비교해 "
-      "공개 후 경과 개월별 수량·금액 차이(절대·%)를 낸다. 사용자가 MEDICINE_202509 ~ 202512를 다시 받아 넣으면 2026-10-28 판본과 비교한다(지금은 실행하지 않음).\n")
+      "다음 실험: 같은 달 자료를 매달 다시 내려받아 판본을 쌓고 수정 폭과 안정 기간을 측정, 완성 계수로 최근 달 보정.\n")
+    w("**c. 직접 비교 (다음 실험용 도구)**: `scripts/p2_usage_vintage_diff.py`(합성 자료 시험 `tests/test_p2_vintage_diff.py`). 같은 달의 두 판본을 성분 × 월·약효분류군 × 월로 비교해 "
+      "공개 후 경과 개월별 수량·금액 차이(절대·%)를 낸다. **다음 실험용 도구**다. 수정 폭의 직접 측정은 이번 범위에서 하지 않는다(사용자 결정 2026-11-19: 내려받은 지 1주일이라 비교할 다른 판본이 없음).\n")
     w("### B. 몇 개월 앞까지 믿을 만한가 (공개 시차 0, origin 2023-01 ~ 2024-12 고정, 성분 32)\n")
     p_ = hz.pivot_table(index="h", columns="model", values=["wape", "mase"])
     p_ = hz.pivot_table(index="h", columns="model", values=["wape", "mase", "wape_amt"])
@@ -96,6 +96,16 @@ def extra_checks(w, src, pct) -> None:
           f"{'예' if hz2.loc[h, ('wape', 'M2')] < hz2.loc[h, ('wape', 'M0')] else '아니오'} | {pct(hz2.loc[h, ('wape_amt', 'M0')])} / {pct(hz2.loc[h, ('wape_amt', 'M2')])} |")
     w(f"\n{src('extra_horizon_top200.csv', 'extra_horizon_top200_verdict.csv')}. 상위 200개: 1개월 앞 대비 10% 넘게 커지는 첫 개월 = **{int(hv2.first_h_10pct)}** → 가설 **{'채택' if hv2.first_h_10pct >= 4 else '기각'}**. "
       f"M2가 M0를 이기는 마지막 개월 수 = **{int(hv2.last_h_m2_beats_m0)}**(1개월부터 끊김 없이 {int(hv2.last_contiguous_h_m2_beats_m0)}개월). 그림은 위와 같은 파일에 두 대상을 함께 그렸다.\n")
+    wn = pd.read_csv(O / "extra_window.csv")
+    w("**평가 기간 맞춤 비교** (기존 예측값, `src/pbd/forecast/extra_window.py`): 공개 시차 5·다음 달과 공개 시차 0·6개월 앞은 같은 대상 달에서 같은 함수 호출"
+      "(gbm(available(panel, t − 1, 5), t − 1, 5), 학습 = 대상 달 t − 6 이하 관측, 예측 기간별 따로 학습)이라 예측이 같다(최대 차이 "
+      f"{wn['same_prediction_maxdiff'].max():.1f}). 차이는 평가한 대상 달뿐이다. M0도 같은 y_(t−12)라 12.0%와 10.2%의 차이는 평가 달 차이다.\n")
+    w("| 대상 | 평가 대상 달 | 달 수 | M0 WAPE | M2 WAPE | M0 / M2 금액 가중 | M2가 나은 성분 | 부호 p | Wilcoxon p |\n|---|---|---|---|---|---|---|---|---|")
+    for x in wn.itertuples():
+        w(f"| {x.set} · {x.part} | {x.first} ~ {x.last} | {x.months} | {pct(x.wape_m0)} | {pct(x.wape_m2)} | {pct(x.wape_amt_m0)} / {pct(x.wape_amt_m2)} | "
+          f"{x.m2_better}/{x.n_series} | {x.sign_p:.4f} | {x.wilcoxon_p:.4f} |")
+    w(f"\n{src('extra_window.csv', 'extra_window_months.csv')}. 다음 달 비교에만 있는 11개월(2023-02 ~ 06, 2025-07 ~ 12)에서 M0가 크게 빗나갔다(2023 상반기는 작년 같은 달이 2022년). "
+      "공통 24개월에서는 처방량 합계 WAPE로 M0가 조금 낫지만, 성분별로는 M2가 나은 성분이 더 많고 금액 가중으로도 M2가 낫다. 처방량 합계는 큰 성분에 무게가 실리므로, 처방량이 큰 몇 성분에서 M0가 나은 것이 합계를 좌우하는 것으로 보인다(성분별 확인은 하지 않았다. 앞의 DM 갈림과 같은 구조).\n")
     sgf2 = pd.read_csv(O / "extra_signif.csv")
     w("### 유의성 검정: 상위 200·층화 200 (기존 예측값, 판단 기준은 DECISIONS 2026-11-19)\n")
     w("| 대상 | lag | a − b | WAPE a / b | 금액 가중 WAPE a / b | a가 나은 성분 | 부호·Wilcoxon (Holm) | 판정(비가중) | DM 비가중 (Holm) | DM 금액 가중 (Holm) |\n|---|---|---|---|---|---|---|---|---|---|")
@@ -479,7 +489,7 @@ def main() -> None:
         f"| W1 | 대상 선정의 생존 편향: 96개월 내내 관측된 성분만 | 주력 묶음 106개 중 {len(tgt)}개, 2022 원외 청구금액의 {pct(cov['amt_share'])} | 한계로 적고 고치지 않는다 (사용자 결정 2026-11-18) |",
         f"| W2 | 주 결과(lag 5)에서 전역 모델이 12개월 전 값에 진다 | MASE M2 {m20.mase_a:.3f} 대 M0 {m20.mase_b:.3f} | 숨기지 않고 결론 첫 줄에 쓴다 |",
         f"| W3 | 신호 특징의 결측이 시기 표시로 작동 (상수 열 실험 E1′로 확인) | lag 5 M3 − M2 {relp(MAIN, 'M3', 'M2'):+.1f}% 중 {relp(MAIN, 'E1_null', 'M2'):+.1f}%가 시기 표시 | 결측을 채우지 않는다(CLAUDE.md). 신호 내용의 몫은 M3 − E1로 따로 보고 |",
-        "| W4 | 수정본 사용통계로 학습·평가. 판본마다 특정 심사 완료 시점까지의 청구만 담는 공식 작성 기준이라 최근 달은 덜 집계될 수 있다 | 수정 폭은 측정 불가(판이 하나). 간접 시험으로는 −5%를 넘는 증거 없음 | L17, 두 판본 비교 스크립트 준비 |",
+        "| W4 | 수정본 사용통계로 학습·평가. 판본마다 심사완료분까지만 반영하는 공식 작성 기준이라 최근 달은 덜 집계되고 이후 변동될 수 있다 | 수정 폭은 직접 측정하지 않음(사용자 결정). 간접 시험: −5%를 넘는다는 증거 없음(중앙값 −3.7%, 분류군 82% 하락 방향) | 같은 달 자료를 매달 다시 받아 판본을 쌓고 수정 폭·안정 기간 측정, 완성 계수로 보정 (두 판본 비교 도구는 다음 실험용) |",
         "| W5 | 가상 재고는 전국·이월 없음·비용 비율 1·3·9·안전계수 0.1(가정값) | 약국 재고가 아니다. 분위 포함률이 τ에 맞지 않아 정책 비교가 섞인다 | 가정 유지 (사용자 결정). 포함률 보정은 향후 과제 |",
         "| W6 | 성분 간 독립을 가정한 검정 | 같은 origin을 공유해 p값이 낙관적일 수 있다 | 다루지 않음 (origin 블록 부트스트랩 미실행). Holm은 다중 비교만 다룬다 |",
         "| W7 | 주력 묶음을 평가 기간(2022~2025) 계절성으로, 규모 조건을 2022 전체로 골랐다 | 계절 모델(M0)에 유리하게 쏠릴 수 있다. lag 5 첫 origin은 2022-08까지만 본다 | 한계로 적고 고치지 않는다 |",
