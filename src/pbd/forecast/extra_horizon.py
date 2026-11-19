@@ -6,7 +6,8 @@ origin M = 2023-01 ~ 2024-12(24개)로 고정해 모든 h가 같은 origin을 �
 (available(panel, origin′, lag′) = month ≤ M, 대상 = M + h). 누수 없음: 입력은 M 이하 사용통계뿐.
 판단 기준(DECISIONS 2026-11-19, 실행 전 기록): 지표 WAPE(%), 보조 MASE. 가설 "1개월 앞 대비 WAPE가 상대 10% 이상 커지는
 첫 개월 수가 4개월 이상"(M2로 판정). "믿을 만함" = M2 WAPE < M0 WAPE, 보고 = M2가 M0를 이기는 마지막 개월 수.
-사용: python -m pbd.forecast.extra_horizon  (출력 outputs/p2/extra_horizon.csv, reports/figures/p2_horizon_curve.png)
+사용: python -m pbd.forecast.extra_horizon [32|top200]  (출력 outputs/p2/extra_horizon[_top200].csv, reports/figures/p2_horizon_curve.png)
+2026-11-19 사용자 지시: 상위 200개 성분으로 같은 설정 반복(top200). 그림은 있는 결과(32·상위 200)를 나란히 그린다.
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ def verdict(t: pd.DataFrame) -> dict:
                 last_h_m2_beats_m0=last_win, last_contiguous_h_m2_beats_m0=contiguous)
 
 
-def figure(t: pd.DataFrame) -> None:
+def figure(t: pd.DataFrame = None) -> None:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -47,10 +48,13 @@ def figure(t: pd.DataFrame) -> None:
             break
         except Exception:
             continue
-    fig, ax = plt.subplots(figsize=(6.4, 3.6), dpi=150)
-    for m, lab, st in (("M0", "작년 같은 달 값", "--"), ("M2", "기계학습 예측 모델", "-")):
-        d = t[t["model"] == m].sort_values("h")
-        ax.plot(d["h"], 100 * d["wape"], st, marker="o", ms=3, label=lab)
+    sets = [(k, OUT / f) for k, f in (("성분 32개", "extra_horizon.csv"), ("상위 200개", "extra_horizon_top200.csv")) if (OUT / f).exists()]
+    fig, ax = plt.subplots(figsize=(6.8, 3.8), dpi=150)
+    for (name, f), col in zip(sets, ("tab:blue", "tab:orange")):
+        tt = pd.read_csv(f)
+        for m, lab, st in (("M0", "작년 같은 달 값", "--"), ("M2", "기계학습 예측 모델", "-")):
+            d = tt[tt["model"] == m].sort_values("h")
+            ax.plot(d["h"], 100 * d["wape"], st, color=col, marker="o", ms=3, label=f"{name}: {lab}")
     ax.set_xlabel("몇 개월 앞 (자료가 바로 공개된다고 둠)")
     ax.set_ylabel("오차 WAPE (%)")
     ax.set_xticks(list(HORIZONS))
@@ -61,8 +65,13 @@ def figure(t: pd.DataFrame) -> None:
     fig.savefig(FIG / "p2_horizon_curve.png")
 
 
-def main() -> None:
-    panel, series, cls = load()
+def main(kind: str = "32") -> None:
+    sfx = "" if kind == "32" else f"_{kind}"
+    if kind == "32":
+        panel, series, cls = load()
+    else:
+        from pbd.forecast.extra_top200 import load200
+        panel, series, cls = load200("fc_target_top200")
     scale = R.scale12(panel, series)
     preds = []
     for h in HORIZONS:
@@ -72,15 +81,16 @@ def main() -> None:
             preds.append(p.assign(origin=[R.madd(o, 1 - h) for o in p["origin"]], model=name, h=h))
             print(f"h {h} {name}", flush=True)
     sc = R.score(pd.concat(preds, ignore_index=True), panel, scale)
-    sc.to_csv(OUT / "extra_horizon_pred.csv", index=False)
+    sc.to_csv(OUT / f"extra_horizon{sfx}_pred.csv", index=False)
     t = W.table(sc, ["h", "model"], W.amt2022(series))   # 청구금액 가중 WAPE 포함 (추가 지시 A)
     OUT.mkdir(parents=True, exist_ok=True)
-    t.to_csv(OUT / "extra_horizon.csv", index=False)
-    pd.DataFrame([verdict(t)]).to_csv(OUT / "extra_horizon_verdict.csv", index=False)
-    figure(t)
+    t.to_csv(OUT / f"extra_horizon{sfx}.csv", index=False)
+    pd.DataFrame([verdict(t)]).to_csv(OUT / f"extra_horizon{sfx}_verdict.csv", index=False)
+    figure()
     print(t.pivot_table(index="h", columns="model", values=["wape", "mase"]).round(4).to_string())
     print(verdict(t))
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    main(sys.argv[1] if len(sys.argv) > 1 else "32")

@@ -122,6 +122,8 @@ p2-extra:
 	$(PY) -m pbd.forecast.extra_horizon
 	$(PY) -m pbd.forecast.extra_top200 top200
 	$(PY) -m pbd.forecast.extra_top200 strat200
+	$(PY) -m pbd.forecast.extra_horizon top200
+	$(PY) -m pbd.forecast.extra_signif
 
 # P2 T5 문서 (결과 보고서 → 2쪽 요약·README·PLAN §8 → P1 요약의 P2 행)
 p2-t5:

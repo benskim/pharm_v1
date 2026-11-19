@@ -171,10 +171,12 @@ def plan_table(N) -> list[str]:
 def readme_block(N) -> str:
     import ext_core as X
     P2 = X.p2_numbers()
-    e = P2["e"]
+    e, t2 = P2["e"], P2["t2"]
+    sg = pd.read_csv(O / "extra_signif.csv").set_index(["set", "lag", "a", "b"])
+    verb = "작았고" if sg.loc[("상위 200", MAIN, "M2", "M0"), "verdict"] == "M2가 나음" else "유의한 차이가 없었고"
     return "\n".join([RD_START,
-        f"**P2 처방 수요 예측**: 성분 32개 × 전국 처방량의 다음 달 예측(약국 단위 아님). 자료가 바로 나온다고 가정하면 기계학습 모델의 오차가 작년 같은 달 값보다 작지만"
-        f"({pct(e.loc[('M2', 0), 'wape'])} 대 {pct(e.loc[('M0', 0), 'wape'])}), 실제 공개 시차 5개월에서는 더 나빴다({pct(e.loc[('M2', 5), 'wape'])}). "
+        f"**P2 처방 수요 예측**: 성분별 전국 처방량의 다음 달 예측(약국 단위 아님). 처방량 상위 200개 성분에서는 실제 공개 시차 5개월에서도 기계학습 모델의 오차가 작년 같은 달 값보다 {verb}"
+        f"({pct(t2.loc[('M2', MAIN), 'wape'])} 대 {pct(t2.loc[('M0', MAIN), 'wape'])}), 호흡기 계열 32개 성분에서는 작년 같은 달 값이 더 나았다({pct(e.loc[('M0', MAIN), 'wape'])} 대 {pct(e.loc[('M2', MAIN), 'wape'])}). "
         "급여목록 처분 예고를 더해도, 실제로 일어난 변화를 미리 알려 줘도 개선되지 않았다. 2쪽 요약: [reports/P2_SUMMARY.md](reports/P2_SUMMARY.md). 실행: `make p2-min`.",
         RD_END])
 

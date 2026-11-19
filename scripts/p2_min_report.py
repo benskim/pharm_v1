@@ -52,8 +52,12 @@ def extra_checks(w, src, pct) -> None:
     c32 = pd.read_csv(O / "t3_compare.csv").set_index(["lag", "a", "b"])
     x32 = pd.read_csv(O / "exp_compare.csv").set_index(["lag", "a", "b"])
     w("## 추가 확인 (2026-11-19, 주 결과와 결론 문장은 바꾸지 않음. 판단 기준은 실행 전에 DECISIONS에 기록)\n")
-    w("### A. 사용통계 사후 수정 — **사용자 가설, 판본 하나뿐이라 간접 시험만 함**\n")
-    w("가설: \"공개된 지 얼마 안 된 달의 사용통계는 덜 집계되어 있고, 나중에 위로 수정된다.\" 같은 달을 다른 시점에 받은 판본이 없어 수정 크기는 직접 잴 수 없다.\n")
+    w("### A. 사용통계 사후 수정 — **공식 작성 기준에 따른 자료 성질** (판본이 하나뿐이라 간접 시험만 함)\n")
+    w("근거: 공공데이터포털 국민건강보험공단_의약품 사용통계 설명 \"건강보험 청구자료 기반, 2018년 1월 ~ 2025년 2월 … (25.5월 심사완료분까지 반영, 25.6.27.)\" "
+      "(https://www.data.go.kr/biz/dcat/metadata/15128709.do), 같은 기관 진료현황 자료 \"진료일 기준, 지급분까지 반영, 청구권 소멸시효 완성(3년) 이전 자료는 변동될 수 있음\" "
+      "(https://www.data.go.kr/data/15160449/fileData.do). 판본마다 특정 심사 완료 시점까지의 청구만 담으므로 최근 달은 덜 집계되고 이후 판본에서 늘 수 있다. "
+      "공개 시차는 약 4개월(2025-02 자료가 2025-06-27 공개)로 가정 5개월과 비슷하다. 같은 달을 다른 시점에 받은 판본이 없어 수정 폭은 직접 잴 수 없다. "
+      "(이전 표기 '사용자 가설'을 2026-11-19 사용자 결정으로 바꿈)\n")
     w("**a. 민감도**: 평가 정답에서 분석 끝 기준 마지막 12개월(2025-01 ~ 12)을 뺀 오차.\n")
     w("| lag | 모델 | 전체 MASE | 전체 WAPE | 마지막 12개월 뺀 MASE | 마지막 12개월 뺀 WAPE | 칸 (전체 → 뺀 뒤) |\n|---|---|---|---|---|---|---|")
     for (lag, m), g in sen.groupby(["lag", "model"]):
@@ -66,7 +70,8 @@ def extra_checks(w, src, pct) -> None:
     for x in rv.itertuples():
         w(f"| {x.unit} | {x.units} | {100 * x.median_drop:+.1f}% | {pct(x.share_negative)} | **{x.verdict}** |")
     w(f"\n![작년 같은 달 대비 비율](figures/p2_revision_ratio.png)\n\n{src('extra_revision_verdict.csv', 'extra_revision_by_k.csv')}. "
-      "**이 비교는 실제 수요 감소와 덜 집계를 구분하지 못한다.** 하락 방향은 단위의 다수에서 보였지만 판단 기준(−5%)에는 미치지 않았다.\n")
+      "**이 방법으로는 수정 폭이 −5%를 넘는다는 증거를 찾지 못했다**(표의 판정 칸은 실행 전 기준의 이름). 하락 방향은 단위의 다수에서 보였다. 이 비교는 실제 수요 감소와 덜 집계를 구분하지 못한다. "
+      "남은 측정 과제: 수정 폭과 안정 기간. 사용 파일의 '심사완료분 반영 시점'을 알면 각 달의 경과 개월을 그것으로 다시 계산한다.\n")
     w("**c. 직접 비교 준비**: `scripts/p2_usage_vintage_diff.py`(합성 자료 시험 `tests/test_p2_vintage_diff.py`). 같은 달의 두 판본을 성분 × 월·약효분류군 × 월로 비교해 "
       "공개 후 경과 개월별 수량·금액 차이(절대·%)를 낸다. 사용자가 MEDICINE_202509 ~ 202512를 다시 받아 넣으면 2026-10-28 판본과 비교한다(지금은 실행하지 않음).\n")
     w("### B. 몇 개월 앞까지 믿을 만한가 (공개 시차 0, origin 2023-01 ~ 2024-12 고정, 성분 32)\n")
@@ -82,6 +87,23 @@ def extra_checks(w, src, pct) -> None:
       f"M2가 M0를 이기는 마지막 개월 수 = **{int(hv.last_h_m2_beats_m0)}**(1개월부터 끊김 없이 {int(hv.last_contiguous_h_m2_beats_m0)}개월). "
       + ("청구금액으로 가중해도 M2가 M0를 이기는 개월은 같다.\n" if ((p_[("wape", "M2")] < p_[("wape", "M0")]) == (p_[("wape_amt", "M2")] < p_[("wape_amt", "M0")])).all()
          else "**청구금액으로 가중하면 M2가 M0를 이기는 개월이 달라진다** (표 참고).\n"))
+    hz2 = pd.read_csv(O / "extra_horizon_top200.csv").pivot_table(index="h", columns="model", values=["wape", "wape_amt"])
+    hv2 = pd.read_csv(O / "extra_horizon_top200_verdict.csv").iloc[0]
+    w("**상위 200개 성분으로 반복** (같은 설정·사전 기준, 판정은 비가중):\n")
+    w("| 몇 개월 앞 | 32개 M0 / M2 WAPE | 상위 200 M0 / M2 WAPE | 상위 200 M2가 나은가 | 상위 200 M0 / M2 금액 가중 WAPE |\n|---|---|---|---|---|")
+    for h in hz2.index:
+        w(f"| {h} | {pct(p_.loc[h, ('wape', 'M0')])} / {pct(p_.loc[h, ('wape', 'M2')])} | {pct(hz2.loc[h, ('wape', 'M0')])} / {pct(hz2.loc[h, ('wape', 'M2')])} | "
+          f"{'예' if hz2.loc[h, ('wape', 'M2')] < hz2.loc[h, ('wape', 'M0')] else '아니오'} | {pct(hz2.loc[h, ('wape_amt', 'M0')])} / {pct(hz2.loc[h, ('wape_amt', 'M2')])} |")
+    w(f"\n{src('extra_horizon_top200.csv', 'extra_horizon_top200_verdict.csv')}. 상위 200개: 1개월 앞 대비 10% 넘게 커지는 첫 개월 = **{int(hv2.first_h_10pct)}** → 가설 **{'채택' if hv2.first_h_10pct >= 4 else '기각'}**. "
+      f"M2가 M0를 이기는 마지막 개월 수 = **{int(hv2.last_h_m2_beats_m0)}**(1개월부터 끊김 없이 {int(hv2.last_contiguous_h_m2_beats_m0)}개월). 그림은 위와 같은 파일에 두 대상을 함께 그렸다.\n")
+    sgf2 = pd.read_csv(O / "extra_signif.csv")
+    w("### 유의성 검정: 상위 200·층화 200 (기존 예측값, 판단 기준은 DECISIONS 2026-11-19)\n")
+    w("| 대상 | lag | a − b | WAPE a / b | 금액 가중 WAPE a / b | a가 나은 성분 | 부호·Wilcoxon (Holm) | 판정(비가중) | DM 비가중 (Holm) | DM 금액 가중 (Holm) |\n|---|---|---|---|---|---|---|---|---|---|")
+    for x in sgf2.itertuples():
+        w(f"| {x.set} | {x.lag} | {x.a} − {x.b} | {pct(x.wape_a)} / {pct(x.wape_b)} | {pct(x.wape_amt_a)} / {pct(x.wape_amt_b)} | {x.a_better_series}/{x.n_series} | "
+          f"{x.sign_p_holm:.4f} · {x.wilcoxon_p_holm:.4f} | {x.verdict} | {x.dm_p_holm:.4f} ({x.dm_verdict}) | {x.dmw_p_holm:.4f} ({x.dmw_verdict}) |")
+    w(f"\n{src('extra_signif.csv')}. 비가중 판정 = 성분별 WAPE 차이의 부호·Wilcoxon이 둘 다 Holm 뒤 p < 0.05. DM = origin별 전체 WAPE 차이 시계열(35개)의 Newey–West t 검정. "
+      "**시차 5의 M2 − M0는 성분별 검정으로는 유의하지만 비가중 DM(origin별 전체 WAPE)으로는 유의하지 않다**: 성분 다수에서 M2가 낫지만 월별 총오차의 차이는 달마다 크게 흔들린다(처방량이 큰 성분·달의 영향일 수 있으나 확인하지 않았다). 금액 가중 DM은 유의하다.\n")
     w("### C. 상위 200개 성분 (약효분류 묶음 조건 없이, 96개월 관측 + 2022 원외 청구수량 상위 200)\n")
     w("| 단계 | 성분4 | 탈락 |\n|---|---|---|")
     for x in t2s.itertuples():
@@ -191,6 +213,10 @@ def main() -> None:
     assert better(dgc[dgc["a"].str.startswith(("M3o", "M3_off"))]).empty, "오라클·시점 이동 중 개선된 것이 있다 — 결론 문장과 다름"
     assert better(dga[dga["a"].str.startswith("M3o")]).empty, "금액 오라클이 개선됐다 — 결론 문장과 다름"
     w(f"**결론**: {CONCLUSION}\n")
+    sgf = pd.read_csv(O / "extra_signif.csv").set_index(["set", "lag", "a", "b"])
+    both = all(sgf.loc[(st_, MAIN, "M2", "M0"), "verdict"] == "M2가 나음" for st_ in ("상위 200", "층화 200"))
+    w("(보충) 상위 200개·층화 200개에서는 시차 5에서도 M2가 M0보다 " + ("오차가 작았다" if both else "유의한 차이가 없었다")
+      + "(추가 확인 D). 선행 신호 특징이 개선하지 못한 결과는 세 대상 모두에서 같았다.\n")
     w("**주 결과의 숫자 (공개 시차 5개월, 예측 대상 = 발간월 M의 다음 달 M+1)**: 전역 모델 M2의 MASE "
       f"{m20.mase_a:.3f}는 12개월 전 값 M0 {m20.mase_b:.3f}보다 나빴다 (M2가 나은 성분 {int(m20.a_better_series)}/{int(m20.n_series)}). "
       f"P1 신호 특징을 넣은 M3 {m32.mase_a:.3f}는 M2보다 나빴다 (M3가 나은 성분 {int(m32.a_better_series)}/{int(m32.n_series)}, Holm 보정 뒤 판정: {m32.verdict_holm}). "
@@ -453,7 +479,7 @@ def main() -> None:
         f"| W1 | 대상 선정의 생존 편향: 96개월 내내 관측된 성분만 | 주력 묶음 106개 중 {len(tgt)}개, 2022 원외 청구금액의 {pct(cov['amt_share'])} | 한계로 적고 고치지 않는다 (사용자 결정 2026-11-18) |",
         f"| W2 | 주 결과(lag 5)에서 전역 모델이 12개월 전 값에 진다 | MASE M2 {m20.mase_a:.3f} 대 M0 {m20.mase_b:.3f} | 숨기지 않고 결론 첫 줄에 쓴다 |",
         f"| W3 | 신호 특징의 결측이 시기 표시로 작동 (상수 열 실험 E1′로 확인) | lag 5 M3 − M2 {relp(MAIN, 'M3', 'M2'):+.1f}% 중 {relp(MAIN, 'E1_null', 'M2'):+.1f}%가 시기 표시 | 결측을 채우지 않는다(CLAUDE.md). 신호 내용의 몫은 M3 − E1로 따로 보고 |",
-        "| W4 | 수정본 사용통계로 학습·평가 | 측정 불가 (판이 하나) | L17, BACKLOG X11 |",
+        "| W4 | 수정본 사용통계로 학습·평가. 판본마다 특정 심사 완료 시점까지의 청구만 담는 공식 작성 기준이라 최근 달은 덜 집계될 수 있다 | 수정 폭은 측정 불가(판이 하나). 간접 시험으로는 −5%를 넘는 증거 없음 | L17, 두 판본 비교 스크립트 준비 |",
         "| W5 | 가상 재고는 전국·이월 없음·비용 비율 1·3·9·안전계수 0.1(가정값) | 약국 재고가 아니다. 분위 포함률이 τ에 맞지 않아 정책 비교가 섞인다 | 가정 유지 (사용자 결정). 포함률 보정은 향후 과제 |",
         "| W6 | 성분 간 독립을 가정한 검정 | 같은 origin을 공유해 p값이 낙관적일 수 있다 | 다루지 않음 (origin 블록 부트스트랩 미실행). Holm은 다중 비교만 다룬다 |",
         "| W7 | 주력 묶음을 평가 기간(2022~2025) 계절성으로, 규모 조건을 2022 전체로 골랐다 | 계절 모델(M0)에 유리하게 쏠릴 수 있다. lag 5 첫 origin은 2022-08까지만 본다 | 한계로 적고 고치지 않는다 |",

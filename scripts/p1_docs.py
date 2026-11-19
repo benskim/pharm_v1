@@ -296,6 +296,7 @@ def check(path: Path, text: str, N) -> list[str]:
             continue
         if not (path.parent / tgt).resolve().exists():
             errs.append(f"{path.name}: 링크 대상 없음 {tgt}")
+    text = text.replace("세 대상(32개, 상위 200개, 층화 200개) 모두에서", "")   # 사용자가 정한 문구(2026-11-19)
     for w in ("정확히", "완벽", "모두", "인과", "영향을 미", "인하된다", "등재된다", "중지된다", "확실히"):
         if w in text:
             errs.append(f"{path.name}: 금지 표현 '{w}'")
