@@ -105,3 +105,151 @@
 4. 성분별 관측 연속성: 96개월 내내 관측된 성분 수, 중간에 나타난 성분 수, 사라진 성분 수
 5. 2026 약가정보 2종과 오렌지북: 키 컬럼, 행 수, 급여목록 제품코드와의 연결률
 6. 전체 기간 비고 문형 빈도표와 `NOTE_RULES.md`에 없는 문형
+
+<!-- 원본 파일 목록 시작 (scripts/data_manifest.py 생성) -->
+
+## 원본 파일 목록 (재현 대조용)
+
+데이터는 저장소에 없다. 아래 표의 이름·크기·SHA-256으로 받은 파일을 대조한다(`python -I scripts/data_manifest.py --check`). 출처 URL은 저장소에 기록된 것만 적었고, 기록이 없는 것은 '확인 필요'다. 받은 날짜는 기록된 날짜, 없으면 파일 수정 시각이다(받은 날로 확인 필요).
+
+| 폴더 | 출처 | 공식 URL | 받은 날짜 | 파일 수 | 크기 합 (바이트) |
+|---|---|---|---|---|---|
+| `data/raw/benefit` | 건강보험심사평가원 약제급여목록 월별 파일 (사용자가 병합한 parquet + 대조용 원본) | 확인 필요 | 파일 수정 시각 2026-11-14 ~ 2026-11-14 (확인 필요) | 11 | 59,354,013 |
+| `data/raw/master` | 2026 약가정보 2종 (심평원 코드 대응표, 의약품안전나라 품목 정보) | 확인 필요 | 파일 수정 시각 2026-11-14 ~ 2026-11-14 (확인 필요) | 3 | 14,023,012 |
+| `data/raw/orangebook` | 식품의약품안전처 의약품 동등성 인정 품목(오렌지북) 2026 | 확인 필요 | 파일 수정 시각 2026-11-14 ~ 2026-11-14 (확인 필요) | 2 | 683,586 |
+| `data/raw/price_2026` | (비어 있음) |  | 파일 수정 시각 2026-11-14 ~ 2026-11-14 (확인 필요) | 1 | 88 |
+| `data/raw/substitute` | 건강보험심사평가원 저가약 대체조제 장려금 대상 약제목록 월별 파일 (사용자가 병합한 parquet) | 확인 필요 | 파일 수정 시각 2026-11-14 ~ 2026-11-14 (확인 필요) | 3 | 9,703,615 |
+| `data/raw/usage` | 국민건강보험공단 의약품 사용통계 (공공데이터포털) | https://www.data.go.kr/biz/dcat/metadata/15128709.do | 2026-11-01 (docs/DATA.md §2, 2026-10-28 공개 판 등) | 98 | 2,411,303,961 |
+| `data/sample` | 설계에 쓴 표본 parquet (사용자 제공, 회귀 시험용) | 사용자 제공 | 파일 수정 시각 2026-11-14 ~ 2026-11-14 (확인 필요) | 9 | 33,738,587 |
+
+| 파일 | 크기 (바이트) | SHA-256 |
+|---|---|---|
+| `data/raw/benefit/README.md` | 628 | `30ef6da0ab535dd8ff6f46fa5f6fd302ac0d3cfd71af62cc6fd048fecd60d811` |
+| `data/raw/benefit/_original_check/1_2025-12-01_약제급여목록.csv` | 4,125,447 | `14f4de7a68e20250a55350f5742a7227a06ecf291a44dfc1f000b246a08ae9f6` |
+| `data/raw/benefit/_original_check/2_2025-11-01_약제급여목록.csv` | 4,112,400 | `11d7991f35eb61b9fea9cb67262c63740c742d39a641c6f806da15044c224543` |
+| `data/raw/benefit/_original_check/약제급여목록및급여상한금액표_(2022.1.1.)(25,054)_1.21.수정.xlsx` | 2,844,813 | `dd5b8aeb17635fc812fe5f5a14fd7e9c14595384894025b173064b15ed1bb9d5` |
+| `data/raw/benefit/_original_check/약제급여목록및급여상한금액표_(2022.3.1.)(25,076)_3.18.수정.xlsx` | 2,783,003 | `92711b338a7a08b0b90ef9f29b3fa15ed914865ea546a8ff166c304ed1987433` |
+| `data/raw/benefit/_original_check/약제급여목록및급여상한금액표_(2022.9.1.)(24,643)_공개_9.19.수정.xlsx` | 2,676,054 | `b6adba1eb7c3bacf6f9d17a78905235be1ac8a35b9b971604c1fb6c10fb20160` |
+| `data/raw/benefit/_original_check/약제급여목록및급여상한금액표_(2023.11.1.)(22,906)_공개용_11.1.수정.xlsx` | 2,565,541 | `ac742820f76592ed091b5810460187b92b1cee673f573671d8b3b4a670192803` |
+| `data/raw/benefit/_superseded/README.md` | 601 | `eb3ccbb00d89a8ee232a2560ef6c8a3c2873b3ca14b2d18df374cce04ce09352` |
+| `data/raw/benefit/_superseded/benefit_snapshot_table_2425.parquet` | 13,141,536 | `dfc97730c62847c35ee6429340b6c241c81406c6fcb2d137db07b2acd16fd10d` |
+| `data/raw/benefit/benefit_snapshot_table_2223.parquet` | 13,968,126 | `07a5494cf3e1cfb809f69a5423d77c9ae0da59641a8d9789de06edda3a9c4bc8` |
+| `data/raw/benefit/benefit_snapshot_table_2425.parquet` | 13,135,864 | `bcf7e8c4f95db3f99b197018bfeb8018545707be98a0c42f87ac92b513d39a83` |
+| `data/raw/master/README.md` | 88 | `9ccfe7b94f5d82fffff9a50331928c4f0696f6efddc0a5c189084fcf042cee5d` |
+| `data/raw/master/dim_drug_code_map_26.parquet` | 9,082,601 | `548bd88de14031cc95d1910db456150368a3ec64788083b98048cf1e92e548e7` |
+| `data/raw/master/dim_drug_info_26.parquet` | 4,940,323 | `12ee3b50a44bb0b474a0339991c3f418fb7f1f292362bc22e6ec87fa65463444` |
+| `data/raw/orangebook/README.md` | 88 | `9ccfe7b94f5d82fffff9a50331928c4f0696f6efddc0a5c189084fcf042cee5d` |
+| `data/raw/orangebook/dim_orange_book.parquet` | 683,498 | `4873c57a5d13239ea664bcb5ec120c29c864490bc3535f5c1adf93f85ed7951c` |
+| `data/raw/price_2026/README.md` | 88 | `9ccfe7b94f5d82fffff9a50331928c4f0696f6efddc0a5c189084fcf042cee5d` |
+| `data/raw/substitute/README.md` | 88 | `9ccfe7b94f5d82fffff9a50331928c4f0696f6efddc0a5c189084fcf042cee5d` |
+| `data/raw/substitute/substitute_snapshot_table_2223.parquet` | 5,037,237 | `3515c17fdcc0573dede4bba643244da3c472102b3fa954dbe3f781e7b7228b28` |
+| `data/raw/substitute/substitute_snapshot_table_2425.parquet` | 4,666,290 | `18c6304528cc5991ec6cd388aadde46916a22b4502f4eafecab918b46a1b1109` |
+| `data/raw/usage/README.md` | 88 | `9ccfe7b94f5d82fffff9a50331928c4f0696f6efddc0a5c189084fcf042cee5d` |
+| `data/raw/usage/cmpn_scheme(2025.2.4.).xlsx` | 12,163 | `8835e13a56e1130b0e9d10ce93d0139a28702274cc2f57182d2f7536a7ad9e1b` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201801 (2024.12.30.).csv` | 26,369,398 | `3a44426658a28dda0745bd63a94d0c7f66207f221dd5e31ec1443074bc52c41e` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201802 (2024.12.30.).csv` | 25,557,538 | `39bbe1d74caf18ea995b1ee37987653a1bdb67962a7288c3ca94c57eb3120d4d` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201803 (2024.12.30.).csv` | 25,124,822 | `4673e3d1d07e59ee216050ef5ac7f579fe3b23145b4a1cfc4c8d78e01fb3c307` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201804 (2024.12.30.).csv` | 25,029,442 | `81b197c0eda9ba2abcdc434b7f50c6d5286b1ea8df50661d988f5c728e9d8be9` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201805 (2024.12.30.).csv` | 25,206,446 | `e2d46b4dfa826d4e411bbc907502985f32136521a12ae99cd7ccd3ec3e247944` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201806 (2024.12.30.).csv` | 24,897,211 | `8aee349011ae6121ee58a1a4436360a8d164c6bfe195ac176c89b961579efe4f` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201807 (2024.12.30.).csv` | 25,081,200 | `b0bc6e57dcd38792868f9365b25dcc9d1278a0a6be4d1d223c2154bb14493b90` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201808 (2024.12.30.).csv` | 25,056,485 | `081b6e26007bdb3920f76de70a6ff137d1cb039242b1578b778be961433e7b84` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201809 (2024.12.30.).csv` | 24,812,681 | `d50cdf646c330d38367e1ff87eb46d5b4a37a8f591822483ffe7c13046a4079c` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201810 (2024.12.30.).csv` | 24,970,881 | `7fa786d68141e1c3183cbff3098728d4d200ec5c3bb6de2fe1131fe25bc10c07` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201811 (2024.12.30.).csv` | 25,008,530 | `86eda899b65553f44500a1f29d3502ccb8c45ad7f5d12258dae3a2da9caa22c5` |
+| `data/raw/usage/cmpn_stat_2018(2024.12.30.)/MEDICINE_201812 (2024.12.30.).csv` | 25,079,320 | `8d6f573d347540286b94639e0117c39073d70a5d436217d7dea7bc63ece13f14` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201901 (2024.12.30.).csv` | 25,336,706 | `e80f8592f05b2405f627ac01186c6194132e6b6770cb5fe4434263fd3ed6f737` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201902 (2024.12.30.).csv` | 24,581,028 | `479698403458e6fe4e3aaf46888ea874f2c19106af414670b0f07fa2625637a4` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201903 (2024.12.30.).csv` | 25,119,363 | `528ae4d206d0c986b3e627878d47f6aca59890eed7718653ed00ed9c614057fc` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201904 (2024.12.30.).csv` | 25,416,800 | `eca9c60ed47d5a886f2587b202750c2bce58299e04ed0f3e6e8229c7ee43a096` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201905 (2024.12.30.).csv` | 25,502,123 | `80861f7fbc40d4b63dbd09d5c240ce7dd1d91cc3be7901d8da7bacc0116bf4e5` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201906 (2024.12.30.).csv` | 25,054,867 | `cca715c7dc627aba86d53f11e1db07c12cb29b0ae8a0e8bdeb04ccd53804fc29` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201907 (2024.12.30.).csv` | 25,417,906 | `e0670d729442b6cc5c89fc22cda76d2211b824412dd90e4725bb62ff75e4297e` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201908 (2024.12.30.).csv` | 25,369,476 | `2be3005d7d6d17cbff68b4ef47cd4f9398cb1468a040ff858652ece890867cad` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201909 (2024.12.30.).csv` | 25,268,713 | `87e336f6df0f07aad62ad6f6598a03250a1c04066b80f3831bb530667c4bae23` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201910 (2024.12.30.).csv` | 25,277,532 | `6c39519efc85ada5820b098a544d3f30f76b4becbed9455698d671ab55a3d6cd` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201911 (2024.12.30.).csv` | 25,231,467 | `c8e53a1f98f7a5168789b78dddb6f688ddb79a1a3f667e33dd27cc1a5aef1070` |
+| `data/raw/usage/cmpn_stat_2019(2024.12.30.)/MEDICINE_201912 (2024.12.30.).csv` | 25,367,997 | `efdc2cab8c48caa3101be078afaa8565093751dfb3d4c14489a91bd47c2ae209` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202001 (2024.12.30.).csv` | 25,397,730 | `be93621b60c60c80174ceaede464f40867aa8d62f73c56b5a5e17afea95a5be2` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202002 (2024.12.30.).csv` | 24,621,204 | `5f4adbe5794c0c7d1e19dc70f867f85d8a43f0ceb41aa5e15e5e03017f8de2bd` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202003 (2024.12.30.).csv` | 24,007,458 | `7f7439c9df1e888c407d98cde02944e11fe81433952ff0fba024d7c7af654c80` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202004 (2024.12.30.).csv` | 23,937,454 | `bbd35b3c0776d3f45e9d84a0ed37e821444687d3e8768e1a794accd988f9083a` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202005 (2024.12.30.).csv` | 24,142,120 | `ebe73dabe1fc5612c984c442f43a692b34e4a8c900e91b48965a42ad58b27e52` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202006 (2024.12.30.).csv` | 24,346,058 | `8b18898873ec22840c09853aaea0e406f81162c531dabd161f779fc7c3d6e7b0` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202007 (2024.12.30.).csv` | 24,569,959 | `eafe0b042ac96abae41770ce8ca3e6219ed248188b1276895b54d36fb5c5f2c2` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202008 (2024.12.30.).csv` | 24,623,890 | `7249a890cac9f048dc8ba8aa3e6a371b47e7c9cfa48d0c21fea4426e9b6b9cb9` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202009 (2024.12.30.).csv` | 24,674,291 | `8d42c76007cc872189dc5187197d46f8ff34befa71bb71419cda652f2935ffaa` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202010 (2024.12.30.).csv` | 24,567,165 | `b8f7d61f73b349c12d4a5b2fa69d5b6f384c592a701e9030ed00cf1b905c9d54` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202011 (2024.12.30.).csv` | 24,496,944 | `5212ef008712fb40b505ae510cd8942517891b5cd13021cb6f4c35edb9f60e6d` |
+| `data/raw/usage/cmpn_stat_2020(2024.12.30.)/MEDICINE_202012 (2024.12.30.).csv` | 24,443,965 | `6cef6e2723c5db94a990b9e25824e5019a23b4ef9f7c687677cafc99904dc42c` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202101 (2025.04.24.).csv` | 24,164,159 | `8e3c0b006b3298575dec2bc9f0318f7ccd2f58161411cee9b93648a77a26cc5b` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202102 (2025.04.24.).csv` | 23,932,071 | `2b3f54d68864843ff5cb8b345752bee767df6b8101e7cc7131a7ea37c9531bef` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202103 (2025.04.24.).csv` | 24,512,966 | `d889e86a7ed719f8312dce9fcd1421178494d1da97da37f5ead4f30d2ee981da` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202104 (2025.04.24.).csv` | 24,534,588 | `53b487819cc5777e80d5df4f931ad0e985c8590b62b069e7a1389954ff8886b9` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202105 (2025.04.24.).csv` | 24,449,576 | `991aac5589357b095d4f107b0cc148008a68f530edaff4cf95c740ccb89d6f57` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202106 (2025.04.24.).csv` | 24,622,589 | `281bc0612dcf910215c8a3ba663e31074331d91bda1f8e7b59133b24c4c08280` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202107 (2025.04.24.).csv` | 24,624,096 | `5c340e70bac2a5eaa0d08a6b1a2912dd228db9908149f53a4659717a9cc35580` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202108 (2025.04.24.).csv` | 24,479,458 | `796e479ce2205ce672fe74bc8dbde2ab0cb036f08ed0a2c3cdfc8a2cdefa7c72` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202109 (2025.04.24.).csv` | 24,568,494 | `6cac4ae90d0d5f5c62ba4db79dd1626adfb607d8fbe6a6ca474a6aa21ee9386e` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202110 (2025.04.24.).csv` | 24,622,082 | `7ebbe3b866f8fa5b0f62f2a2915cbaf93e0e5224d7c13e31a3a9eda1d7daf5c7` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202111 (2025.04.24.).csv` | 24,639,229 | `427e36b0280e8af527c5ad5e1791295e48d9f10e71c1f287aaac4e514fc4999c` |
+| `data/raw/usage/cmpn_stat_2021(2025.04.29.)/MEDICINE_202112 (2025.04.24.).csv` | 24,384,628 | `cf19b7d916fe5a249ac406241c2b45991196a36ce2ea912f3ac06fb894b80ea8` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202201 (2026.04.27.).csv` | 24,270,952 | `c03a5d27632aa567e100822da9165bd818c7357c1812ee81134025fb135e31f1` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202202 (2026.04.27.).csv` | 23,950,773 | `42a9ac076fd19712e20ad95a3c1fec2964a8e955065489f95ebcdc8a61131a82` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202203 (2026.04.27.).csv` | 24,494,109 | `45245126970347cf575309a518a81e84361e503b7349b01476c4361918f960fb` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202204 (2026.04.27.).csv` | 24,557,898 | `3468a1c771cb220317eba5c865f819b1e6e5f7eeb65a0f0b7dc945510dfe7b13` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202205 (2026.04.27.).csv` | 24,565,213 | `789f0b8972127453998b1427cc03f420978c70128ff3eb043b5b0476da07981e` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202206 (2026.04.27.).csv` | 24,487,045 | `f2b7f98c97c78c3495ac2ece5cbe750668c71bce89fdd8394b75cf589098efc8` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202207 (2026.04.27.).csv` | 24,799,794 | `de1317e9bcfebbecd7f1575d745bc290147a71b934d76164330dab2301e117f4` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202208 (2026.04.27.).csv` | 25,037,601 | `87ea2e288f927bdca276561024318e4725a323844aaf7f741c96ab5d9fef1df2` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202209 (2026.04.27.).csv` | 24,642,151 | `ff40b6bf7e9942e24928640a7d731bda01379f67cda7ea2956afdbe43b5c5599` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202210 (2026.04.27.).csv` | 24,591,705 | `693262cc9857de64222b8a81874747ea20757d05d67b71a4aec6d79d5ed83c12` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202211 (2026.04.27.).csv` | 24,836,413 | `4edef77dee4f3d2a1492ba9ea81b8948e622ca43e220b03ffce500b342cfc9b6` |
+| `data/raw/usage/cmpn_stat_2022(2026.04.27.)/MEDICINE_202212 (2026.04.27.).csv` | 24,943,551 | `1a23d2c53a8a6d9ef0ef28a6cea2f06177822b3daac870796e414e5215f4d6de` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202301 (2026.10.28.).csv` | 24,906,915 | `2fea8cc69b4162ded016ed764c4e46a568bfe66462bac2ebd3e1ec3a844ffd22` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202302 (2026.10.28.).csv` | 24,545,625 | `4ea9e69dc4f32b53fece467bd9b9cf3e057e313989ade421be3ce55a285282aa` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202303 (2026.10.28.).csv` | 24,888,766 | `6167c0c087eede816d104c8eecc542cabe4e1f4970106e72d02db06acab46f65` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202304 (2026.10.28.).csv` | 25,000,557 | `0f3131b36a26d1f3e050fabee4855e397f89e07e5b8c024943c5321c901119f4` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202305 (2026.10.28.).csv` | 25,539,316 | `ea1545840eaedb6d0c074ebffe9cb3fb64735882169e3ad4139a39dfdc08f79c` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202306 (2026.10.28.).csv` | 25,384,593 | `ca3ef5721fc91c8e82c03d2653204c4e68e85ca08aa97c8bf5d446f3d6632972` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202307 (2026.10.28.).csv` | 25,401,001 | `3cf6e7a92077689106c9ac016de128a294c89b70296d9519c7f7fc411fcadf6f` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202308 (2026.10.28.).csv` | 25,491,939 | `420b1a9f87bcf21310f39d341d96c6de34c7e70e873b18c5e8d10090f4b80de2` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202309 (2026.10.28.).csv` | 25,238,281 | `64bdf4fdf4745b34035b01f3dd0c46a9bc7e3379b56a292938134509540a86ac` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202310 (2026.10.28.).csv` | 25,505,893 | `1d354794496520104b19f78a5b136d206be5256e71cd01599d834cf4f892a881` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202311 (2026.10.28.).csv` | 25,645,088 | `22754bc12fe9639d84ef387268d7baf1a9cc9d5d2f99a194571b0a464e45ce54` |
+| `data/raw/usage/cmpn_stat_2023(2026.10.28.)/MEDICINE_202312 (2026.10.28.).csv` | 25,644,954 | `29da63bf83ce2e33ac49ae744f0ce470d85b41d44641f0cdb9faffae1bb8e574` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202401 (2026.10.28.).csv` | 25,962,270 | `f982180e706403cbb4c12c79b1bb6b19529d49c2304c84026ac89adea4d18e54` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202402 (2026.10.28.).csv` | 25,629,670 | `f32b2885963cccc1312160abb8f322432dee283aa34604e7a8b7700676717d75` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202403 (2026.10.28.).csv` | 25,663,289 | `9af3eff6315b2199345ddfec2fb4347c2a61bdae089fcf5af1bbb3bb42cf319a` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202404 (2026.10.28.).csv` | 25,882,138 | `dca186092869e3902d5b74b5357947e1b4acc28d3ff6f2acbd56c11b0cab925b` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202405 (2026.10.28.).csv` | 25,996,666 | `65715d5f168670d965da56df889afbc4ee89bacc6108e2e2858da7f557a741d9` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202406 (2026.10.28.).csv` | 25,400,095 | `cb2caf40e2b103bc72a23c1f35ecff163c24207b9b878e179341ef89b6651104` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202407 (2026.10.28.).csv` | 25,819,731 | `053141052e343441fbf0c2b4ef13e5c1eef5ec34239a76b555d5692f5b548257` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202408 (2026.10.28.).csv` | 25,773,222 | `0b694fc64cb3011e9844aa1de4a77cf8a0796c4dbc0f191c904ebb0eac38bad8` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202409 (2026.10.28.).csv` | 25,507,521 | `53fa90847fa702ae14959bd776c966b6eb5797ec3ae82d6cc31fd3627e824270` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202410 (2026.10.28.).csv` | 25,670,840 | `660471804a77551d7da8c5aabaea4e55ae1f8542ccc16207d785898c6584c057` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202411 (2026.10.28.).csv` | 25,729,649 | `cc82092488b1788ec9bbabb86500a3483f45375860e65df672820f505ab41f5c` |
+| `data/raw/usage/cmpn_stat_2024(2026.10.28.)/MEDICINE_202412 (2026.10.28.).csv` | 25,845,870 | `688c20e8b75c62519d5c45d073f8ca0091739aaa02050a8aa17fa883b171655e` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202501 (2026.10.28.).csv` | 25,778,085 | `f7a55fd325890635ea120eef10e0eadfbdef78b3a1a5bfe69900aef3385828cb` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202502 (2026.10.28.).csv` | 25,610,133 | `3c030e19ad610ae618b6a8ff4ac06901b0c2a0678b131b96e45604c335678d50` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202503 (2026.10.28.).csv` | 25,675,315 | `4a298ec6d5c205985622ae712e292c7b33d15cfff6dea6d1e0b355f3120fa3e7` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202504 (2026.10.28.).csv` | 25,950,125 | `45b56e93d849388588588e24e54f9f093edb6742680ad82639a1c74070e75355` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202505 (2026.10.28.).csv` | 26,124,709 | `86fef2e99d22b1110642edbffcdd0022a429fa78de25ac0d4135368a85577cc3` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202506 (2026.10.28.).csv` | 25,805,780 | `3ffbff62bdbe80c21bb33863a3fb4ed503e845539451ad6d32d1101d8c40043d` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202507 (2026.10.28.).csv` | 26,190,333 | `ac9c773aacf5cccce4a62bdb702ce6296e1e781d1632e8f1e967a2f8fd5862d6` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202508 (2026.10.28.).csv` | 26,033,829 | `d6f0f4520932d6e956fe24289346288b358a737247201ecd66adf8867038aa03` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202509 (2026.10.28.).csv` | 26,189,657 | `8ccd5e15cfc18c9047acc44d4680d8e979e72f4e201bb284a96e7b7b7b7dcd72` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202510 (2026.10.28.).csv` | 25,929,961 | `c6474b30ddfd91a21c1ae9eecfe103b3725d1363674a24ce6acd2ff47b7748f9` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202511 (2026.10.28.).csv` | 26,083,213 | `7559566c55623974fdff273449fe915c7de63f0d1578bfa436dfa43fe2a8ba0a` |
+| `data/raw/usage/cmpn_stat_2025(2026.10.28.)/MEDICINE_202512 (2026.10.28.).csv` | 26,169,370 | `8b04292ef80f60fdbb30cac4e199165fd40c0a482d69064ffefd846b70ec1155` |
+| `data/sample/README.md` | 101 | `9b4ae7a31248d516758c55f544f3f5f40a1649d717e9492587423f7e789c38a5` |
+| `data/sample/benefit_snapshot_table_2425.parquet` | 13,141,536 | `dfc97730c62847c35ee6429340b6c241c81406c6fcb2d137db07b2acd16fd10d` |
+| `data/sample/dim_drug_info.parquet` | 4,940,323 | `12ee3b50a44bb0b474a0339991c3f418fb7f1f292362bc22e6ec87fa65463444` |
+| `data/sample/dim_drug_master_20260831.parquet` | 9,082,601 | `548bd88de14031cc95d1910db456150368a3ec64788083b98048cf1e92e548e7` |
+| `data/sample/dim_generic_master.parquet` | 683,498 | `4873c57a5d13239ea664bcb5ec120c29c864490bc3535f5c1adf93f85ed7951c` |
+| `data/sample/fact_cmpn_stat_2023.parquet` | 396,496 | `e79539a800c495f2d734e84c08ad2fb4f1a775d585fea67c0cae9ab59a84defc` |
+| `data/sample/fact_cmpn_stat_2024.parquet` | 411,724 | `c59ea0887ba1c5dbab9f80abcfb0f8c21af10c1d57ab0f53df46cd1575e8dba2` |
+| `data/sample/fact_cmpn_stat_2025.parquet` | 416,018 | `cdd7f4b1618b2e4b9702f0302967610de4ca6911e7f8da0ff8eb242b48441462` |
+| `data/sample/substitute_snapshot_table_2425.parquet` | 4,666,290 | `18c6304528cc5991ec6cd388aadde46916a22b4502f4eafecab918b46a1b1109` |
+
+<!-- 원본 파일 목록 끝 -->

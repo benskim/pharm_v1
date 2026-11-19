@@ -4,7 +4,7 @@ export PYTHONPATH := src
 
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
-        p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 all
+        p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 p1-build all
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -131,6 +131,7 @@ p2-t5:
 	$(PY) -I scripts/p2_min_report.py
 	$(PY) -I scripts/p2_docs.py
 	$(PY) -I scripts/p1_docs.py
+	$(PY) -I scripts/overview.py
 
 p2-min: p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-t5
 
@@ -140,4 +141,7 @@ p2-t4:
 # P1 전체. P2 단계는 구현한 뒤 all에 넣는다 (사용자 결정 2026-11-16)
 p1-all: s0 check-sample p1-s1 p1-s2 p1-v5 p1-s4 p1-s5 p1-s6 test
 
-all: p1-all
+# 전체 (2026-11-19): P1 단계 → P2 최소판(진단·추가 확인·문서 포함) → 전체 시험
+p1-build: s0 check-sample p1-s1 p1-s2 p1-v5 p1-s4 p1-s5 p1-s6
+
+all: p1-build p2-min test

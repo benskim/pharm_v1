@@ -48,7 +48,7 @@ def p1_numbers() -> dict:
     ub = q("select count(*) from ev_v5 where event_type = 'PRICE_CHANGE' and kind = 'unobserved_notice' and batch")[0][0]
     ky = q("""select count(*) from signal_v5 where signal_type = 'SUSPEND_NOTICE' and stay_blocked and stay_target_source = 'external'
               and signal_date = '2025-06-24'""")[0][0]
-    return dict(price_B_all=prall["B"][2], unannounced_rest=(u_ - ub) / (s_ + u_ - ub), sus_stay_list=(sus["stay"][0] - ky) / sus["stay"][1],
+    return dict(price_B_k=pr2["B"][0], price_B_n=pr2["B"][1], n_price=s_ + u_, price_B_all=prall["B"][2], unannounced_rest=(u_ - ub) / (s_ + u_ - ub), sus_stay_list=(sus["stay"][0] - ky) / sus["stay"][1],
                 price_B=pr2["B"][2], sus_stay=sus["stay"][2], sus_stay_k=sus["stay"][0], sus_stay_n=sus["stay"][1],
                 top2=firms[0][1] + firms[1][1], top2_names=(firms[0][0], firms[1][0]), unannounced=u_ / (s_ + u_),
                 hold_after=g("유형 (라벨 판정 후)").precision, hold_init=g("유형 (처음 라벨)").precision, hold_date=g("날짜").precision,
@@ -116,7 +116,13 @@ def core(P1: dict, P2: dict, which: str = "all") -> list[str]:
     wn = wn[wn["set"] == "상위 200"].set_index("part")
     win1, win2 = wn.loc["① 시차 5·다음 달 전체"], wn.loc["①과 ②에 공통인 대상 달"]
     assert wn["same_prediction_maxdiff"].max() == 0, "'같은 예측'과 다르다"
-    assert win2.wape_m0 < win2.wape_m2 and win2.m2_better > win2.n_series / 2, "평가 기간 설명 문장과 다르다"
+    assert win2.wape_m0 < win2.wape_m2 and win2.wape_amt_m2 < win2.wape_amt_m0, "(참고) 줄의 24개월 비교와 다르다"
+    assert (win2["first"], win2["last"], int(win2.months)) == ("2023-07", "2025-06", 24), "(참고) 줄의 기간과 다르다"
+    only = wn.loc["①에만 있는 대상 달"]
+    assert only.wape_m0 > only.wape_m2, "'작년 같은 달 값이 크게 빗나간' 근거(11개월 M0 > M2)와 다르다"
+    om = pd.read_csv(O / "extra_window_months.csv")
+    om = set(om[om["set"] == "상위 200"]["target"])
+    assert om == set(["2023-0%d" % k for k in range(2, 7)] + ["2025-%02d" % k for k in range(7, 13)]), f"'2023년 상반기와 2025년 하반기'와 다르다: {sorted(om)}"
     top_sig = s_top.verdict == "M2가 나음"
     st_sig = s_st.verdict == "M2가 나음"
     share76 = P2["t2v"].amt_share
@@ -134,9 +140,9 @@ def core(P1: dict, P2: dict, which: str = "all") -> list[str]:
           f"(분류·규모·업체 수로 고르게 뽑은 층화 200개 성분: {'유의' if st_sig else '유의하지 않음'} — WAPE {pct(st.loc[('M2', 5), 'wape'])} vs {pct(st.loc[('M0', 5), 'wape'])}) "
           f"자료가 제때 있다면 상위 200개는 {int(hv2.last_h_m2_beats_m0)}개월 앞까지, 호흡기 32개는 {int(hv.last_h_m2_beats_m0)}개월 앞까지 작년 같은 달 값보다 나았다. "
           f"오차는 2개월 앞부터 1개월 앞 대비 약 {pct(g200, 0)}(상위 200개)·{pct(g32, 0)}(32개) 커졌다. "
-          f"(참고: 공개 시차 5개월의 다음 달 예측과 자료가 제때 있을 때의 6개월 앞 예측은 같은 대상 달에서 같은 예측이다. 평가한 달만 다르다({int(win1.months)}개월 대 {int(win2.months)}개월). "
-          f"작년 같은 달 값이 크게 빗나간 2023년 상반기·2025년 하반기는 다음 달 비교에만 들어 있어, 공통인 {int(win2.months)}개월만 보면 6개월 앞에서 처방량 합계 기준으로 작년 같은 달 값이 조금 나았다"
-          f"({pct(win2.wape_m0)} 대 {pct(win2.wape_m2)}; 성분별로는 200개 중 {int(win2.m2_better)}개에서 기계학습 모델이 나았다))")
+          f"(참고: 평가하는 달을 바꾸면 결과가 달라진다. {win2['first']}~{win2['last']}의 {int(win2.months)}개월만 보면 전체 오차는 작년 같은 달 값이 약간 낮았고"
+          f"({pct(win2.wape_m0)} vs {pct(win2.wape_m2)}), 금액 가중 오차는 모델이 낮았다({pct(win2.wape_amt_m0)} vs {pct(win2.wape_amt_m2)}). "
+          "차이는 작년 같은 달 값이 크게 빗나간 2023년 상반기와 2025년 하반기에서 생겼다.)")
     c3 = ("3. **급여목록의 가격·등재 정보는 세 대상(32개, 상위 200개, 층화 200개) 모두에서 성분 전체 처방량 예측을 개선하지 못했다.** 실제로 일어난 변화를 미리 알려 준 시험에서도 개선이 없었다. "
           "이것은 목록 정보가 쓸모없다는 뜻이 아니다. 그 정보가 움직이는 곳은 성분 안의 제품별 처방 비중과 약국 재고의 가격 위험일 가능성이 크다고 본다(검증하지 않은 추정). 이 프로젝트는 그쪽을 측정하지 않았다.")
     wamt = t2.loc[("M2", 5), "wape_amt"]

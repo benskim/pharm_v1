@@ -20,3 +20,9 @@ data/raw/
 outputs/precheck_sample.md
 *.duckdb
 *.duckdb.wal
+# 재현에 필요한 고정 기록 (라벨 완료 뒤 대응표, 원장 c63778c 기준 정밀도·지표, 2026-11-19)
+!outputs/validation/holdout_30.key.csv
+!outputs/validation/holdout_30.compared_c63778c.csv
+!outputs/validation/holdout_precision_c63778c.csv
+!outputs/validation/holdout_precision_v5_3.csv
+!outputs/v5/metrics_c63778c.csv
