@@ -1,0 +1,27 @@
+{
+ "folder": "data/raw/usage/cmpn_stat_2026(2026.10.28.)",
+ "files": 6,
+ "use": 6,
+ "months": [
+  "2026-01",
+  "2026-02",
+  "2026-03",
+  "2026-04",
+  "2026-05",
+  "2026-06"
+ ],
+ "early_files": [],
+ "late_files_not_read": [],
+ "missing_target_months": [],
+ "other_files": [],
+ "schema_reference": "MEDICINE_202501 (2026.10.28.).csv",
+ "schema_problems": [],
+ "std_yyyymm_by_file": {
+  "MEDICINE_202601 (2026.10.28.).csv": "202601",
+  "MEDICINE_202602 (2026.10.28.).csv": "202602",
+  "MEDICINE_202603 (2026.10.28.).csv": "202603",
+  "MEDICINE_202604 (2026.10.28.).csv": "202604",
+  "MEDICINE_202605 (2026.10.28.).csv": "202605",
+  "MEDICINE_202606 (2026.10.28.).csv": "202606"
+ }
+}

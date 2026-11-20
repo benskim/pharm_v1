@@ -1,0 +1,22 @@
+{
+ "file": "outputs/p2v2/stage4/forecasts.csv",
+ "sha256": "5dd6d5fed1a18b7a19a914f05f0db6b27494ae48bd098c90baec1813fe9fc57d",
+ "rows": 12024,
+ "models": [
+  "B1",
+  "B2",
+  "B3",
+  "G"
+ ],
+ "target_months": [
+  "2026-01",
+  "2026-02",
+  "2026-03",
+  "2026-04",
+  "2026-05",
+  "2026-06"
+ ],
+ "input_usage_max": "2025-12",
+ "code_hash": "58169b3aa5c2008889e6917c439715c19acdb366d9c816cba4d0a333927405b1",
+ "prereg_tag": "p2v2-prereg-r1"
+}
