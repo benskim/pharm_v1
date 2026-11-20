@@ -4,7 +4,8 @@ export PYTHONPATH := src
 
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
-        p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 p1-build all p1-holdout-v53
+        p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 p1-build all p1-holdout-v53 \
+        p2v2-select p2v2-power p2v2-ewc-check p2v2-power-ewc p2v2-dryrun p2v2-rho p2v2-prereg-check p2v2-backtest
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -152,3 +153,38 @@ p1-all: s0 check-sample p1-s1 p1-s2 p1-v5 p1-s4 p1-s5 p1-s6 test
 p1-build: s0 check-sample p1-s1 p1-s2 p1-v5 p1-s4 p1-s5 p1-s6
 
 all: p1-build p2-min test
+
+# P2 v2 사전등록 전 단계 (docs/PLAN_P2_v2.md §7-2). 사용통계는 2022-12 이하만 읽고 예측 오차(평가 기간)는 계산하지 않는다
+p2v2-select:
+	$(PY) -m pbd.forecast_v2.select
+	$(PY) -m pytest -q tests/test_p2v2_select.py
+
+p2v2-power: p2v2-select
+	$(PY) -m pbd.forecast_v2.power
+	$(PY) -m pytest -q tests/test_p2v2_dm.py
+
+# EWC 주 검정 후보 검증 V1 ~ V6 (DECISIONS 2026-11-20). 3단계 산출(power_pre_series.csv)만 읽는다
+p2v2-ewc-check:
+	$(PY) -m pytest -q tests/test_p2v2_ewc.py
+	$(PY) -I scripts/p2v2_ewc_check.py
+
+# 주 검정(EWC) 기준 사전 검출력 → outputs/p2v2/power_ewc.csv (DM 기준 power.csv는 보존, 2026-11-20)
+p2v2-power-ewc:
+	$(PY) -m pbd.forecast_v2.power --ewc
+
+# 합성 자료 전 과정 시험 (dry run, PLAN §7-2). 실제 자료를 읽지 않는다 → outputs/p2v2/dryrun/
+p2v2-dryrun:
+	$(PY) -m pbd.forecast_v2.dryrun
+	$(PY) -I scripts/p2v2_verdict.py outputs/p2v2/dryrun
+
+# ρ_M 캐시 (origin M마다 build_asof(M) 원장의 약가 예고 정시 실현 비율). 사용통계는 읽지 않는다 → outputs/p2v2/rho_asof.csv
+p2v2-rho:
+	$(PY) -m pbd.forecast_v2.rho
+
+# 사전등록 잠금 상태·해시 보고 (사용통계를 읽지 않는다) → outputs/p2v2/prereg_check.json
+p2v2-prereg-check:
+	$(PY) -m pbd.forecast_v2.real --check
+
+# 실제 자료 백테스트 (태그 p2v2-prereg-r1과 잠금 파일이 같을 때만. 태그가 없으면 거부)
+p2v2-backtest:
+	$(PY) -m pbd.forecast_v2.real

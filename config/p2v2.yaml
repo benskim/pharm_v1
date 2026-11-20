@@ -1,0 +1,41 @@
+# P2 v2 설정 (docs/PLAN_P2_v2.md, docs/PREREG_P2V2.md). 사전등록 태그 뒤에는 바꾸지 않는다 (PLAN §7-8).
+# seed·usage_lag_months·data_years는 config/params.yaml 값을 쓴다.
+
+selection:
+  a0: "2022-07"                     # 선정 기준 시점 (첫 평가 대상월 2023-01의 마지막 관측월)
+  obs_start: "2018-01"
+  n_months: 55                      # 2018-01 ~ 2022-07 모두 원외 관측 (사용자 결정 Q1)
+  weight_period: ["2018-12", "2019-11"]      # 주 가중치·금액 조건 (사용자 결정 Q2, §9-2 확인 2)
+  weight_period_alt: ["2021-08", "2022-07"]  # 보조 A18 가중치 민감도 (§9-2 확인 3a)
+  class_list_month: "2022-07"       # 성분4 → 분류: 이 달 급여목록, 제품 수 최다·같으면 작은 번호. 없으면 0 ('000')
+  subgroup_h: [141, 222, 229, 618]  # 하위 집단 H (보고만)
+
+eval:
+  h: 6
+  start: "2023-01"
+  end: "2025-12"
+  r1: ["2024-01", "2025-12"]        # 견고성 R1: 기준 해 이상(2023) 제외
+  r2: ["2023-01", "2024-10"]        # 견고성 R2: 덜 집계 가능(2024-11 ~ 2025-12) 제외
+
+verdict:
+  alpha: 0.05
+  delta_q1: 0.005                   # 금액 가중 WAPE 절대 0.5%p (사용자 결정 Q5)
+  delta_q2: 0.005                   # 금액 가중 단가 절대 로그오차 0.005 (§9-2 확인 1)
+  dm_lag_max: 5                     # 가중 없는 자기공분산 지연 0 ~ h−1
+  dm_fallback_bartlett: 5           # 가중 없는 분산 ≤ 0일 때
+  dm_robust_bartlett: 12            # 견고성 p
+
+# 주 검정 (2026-11-20 사용자 결정, 검증 V1 ~ V6 뒤 승인, 사전등록 변경 이력 B1 ~ B7)
+main_test:
+  method: ewc                       # Lazarus·Lewis·Stock·Watson(2018) equal-weighted cosine, t(ν)
+  nu_coef: 0.4                      # ν = round(0.4 · T^(2/3)): T = 36 → 4, T = 24 → 3
+  sensitivity: [dm_hln, bartlett12] # 판정에 쓰지 않음, 결과와 주 검정과의 차이를 공개
+  q2d_use_r1r2: false               # Q2-d(T = 24)는 R1·R2 조건 없이 부호로만
+  stage4_pvalue: false              # Stage 4는 p값 없이 부호 일치만
+
+# 태그 전 사전 검출력 시뮬레이션 (PLAN §5-8). 2023-01 이후 정답을 쓰지 않는다
+power:
+  data_max_month: "2022-12"         # 이 달 뒤 사용통계는 읽지 않는다
+  n_sim: 10000
+  effects_in_delta: [0, 1, 2]       # 참 ΔWAPE = −k·δ (0 = 크기 확인). 사전등록에 적는 행 (PLAN §5-8)
+  effects_ref_in_delta: [3, 4, 6]   # 참고: 검출력 80%에 필요한 효과 크기 가늠 (판정·사전등록 기준 아님)

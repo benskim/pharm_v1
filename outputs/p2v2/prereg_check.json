@@ -1,0 +1,39 @@
+{
+ "gate_ok": false,
+ "deviation_only": false,
+ "reason": "태그 p2v2-prereg-r1 없음 — 사전등록 전에는 실제 백테스트를 실행하지 않는다",
+ "head": "9c7743a938fcb7dd39cc9d1a7f298cfbf71108b3",
+ "code_hash": "58169b3aa5c2008889e6917c439715c19acdb366d9c816cba4d0a333927405b1",
+ "tag_hash": null,
+ "locked_files": [
+  "config/p2v2.yaml",
+  "scripts/p2v2_verdict.py",
+  "src/pbd/forecast_v2/__init__.py",
+  "src/pbd/forecast_v2/backtest.py",
+  "src/pbd/forecast_v2/baselines.py",
+  "src/pbd/forecast_v2/calendar_kr.py",
+  "src/pbd/forecast_v2/dm.py",
+  "src/pbd/forecast_v2/ets.py",
+  "src/pbd/forecast_v2/evaluate.py",
+  "src/pbd/forecast_v2/gate.py",
+  "src/pbd/forecast_v2/gbm.py",
+  "src/pbd/forecast_v2/list_info.py",
+  "src/pbd/forecast_v2/metrics.py",
+  "src/pbd/forecast_v2/power.py",
+  "src/pbd/forecast_v2/q2.py",
+  "src/pbd/forecast_v2/real.py",
+  "src/pbd/forecast_v2/rho.py",
+  "src/pbd/forecast_v2/run.py",
+  "src/pbd/forecast_v2/select.py",
+  "src/pbd/forecast_v2/stage4.py",
+  "src/pbd/forecast_v2/timeaxis.py"
+ ],
+ "verification_only_sha256": {
+  "src/pbd/forecast_v2/dryrun.py": "f7a988d9faa9561b602dcafcb8aa9ae4ffa6c58c3a4f9c071405867360d5945b",
+  "scripts/p2v2_ewc_check.py": "ce79e61bc06750b02e0e9f385aadf0983e480283c813e5ec3df1834553f99845"
+ },
+ "config_sha256": "fcb96665b6bb85bc25b4180aa07d59ea963f34c975747a85a95baae38cee6b50",
+ "target_sha256": "064cd52454ca265580c515bb39a709860de86c0da02c02c5d3b931d30c3dc82c",
+ "rho_sha256": "3960ff3b8da87aebdab265f187c8bf39eee5ceb84618a207823d013f3c819abc",
+ "rho_missing": []
+}
