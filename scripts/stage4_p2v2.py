@@ -34,6 +34,20 @@ def file_month(name: str) -> str | None:
     return f"{m.group(1)}-{m.group(2)}" if m else None
 
 
+def load_actuals_fixed(u, con, files: list[str]) -> pd.DataFrame:
+    """태그 뒤 버그 우회(사용자 결정 2026-11-20 (가)): 잠금 파일 stage4.load_actuals와 같은 쿼리·같은 점검이되,
+    열 별칭 month를 `as month`로 쓴다(DuckDB 예약어라 원래 쿼리는 문법 오류로 한 줄도 읽지 못했다).
+    diff: `|| substr(STD_YYYYMM, 5, 2) month,` → `|| substr(STD_YYYYMM, 5, 2) as month,` (그 밖은 같음)"""
+    assert isinstance(u, S4.Stage4Unlock) and u.step == "actuals"
+    from pbd.common import sql_files
+    d = con.execute(f"""select lpad(WK_COMPN_4, 4, '0') c4, substr(STD_YYYYMM, 1, 4) || '-' || substr(STD_YYYYMM, 5, 2) as month,
+                               sum(cast(PRSCRPTN_TOT_USE as double)) qty
+                        from read_csv({sql_files(files)}, header = true, all_varchar = true)
+                        where OUT_IN_HOS = 'OUT' group by 1, 2""").df()
+    assert d.month.isin(S4.TARGET_MONTHS).all(), "2026-01 ~ 06 밖의 달이 있다"
+    return d.assign(observed=True)
+
+
 def manifest() -> int:
     u = S4.guard("manifest")
     OUT.mkdir(parents=True, exist_ok=True)
@@ -96,7 +110,7 @@ def score() -> int:
     files = [str(FOLDER / p) for p in mf[mf.use].path]
     for p in files:                                            # 파일 기록 뒤 바뀌지 않았는지
         assert G.sha256_file(Path(p)) == mf.set_index("path").loc[str(Path(p).relative_to(FOLDER)), "sha256"]
-    act = S4.load_actuals(u, connect(None), files)
+    act = load_actuals_fixed(u, connect(None), files)      # 잠금 함수의 문법 오류 우회 (위 docstring)
     act.to_csv(OUT / "actuals.csv", index=False)
     S4.guard("score")
     t = pd.read_csv(ROOT / "outputs/p2v2/target.csv", dtype={"c4": str, "cls3": str})
