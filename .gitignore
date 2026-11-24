@@ -31,3 +31,6 @@ outputs/precheck_sample.md
 
 # 2026 자료 임시 보관 (p2v2-prereg 태그 전까지 열지 않음, 2026-11-19). 형식과 관계없이 저장소에 넣지 않는다
 data/temp/
+# P2 v3 실험 사전등록 r2 잠금 파일(군 배정·군 패턴 특징, 2026-11-24). 잠금 확인이 태그에서 읽는다
+!config/p2v3_groups.csv
+!config/p2v3_group_features.csv

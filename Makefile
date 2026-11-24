@@ -5,7 +5,7 @@ export PYTHONPATH := src
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
         p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 p1-build all p1-holdout-v53 \
-        p2v2-select p2v2-power p2v2-ewc-check p2v2-power-ewc p2v2-dryrun p2v2-rho p2v2-prereg-check p2v2-backtest p2v3-group p2v3-regroup p2v3-hybrid p2v3-pooling p2v3-consistency
+        p2v2-select p2v2-power p2v2-ewc-check p2v2-power-ewc p2v2-dryrun p2v2-rho p2v2-prereg-check p2v2-backtest p2v3-group p2v3-regroup p2v3-hybrid p2v3-pooling p2v3-consistency p2v3-exp-smoke p2v3-exp
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -210,3 +210,13 @@ p2v3-pooling: p2v3-hybrid
 # P2 v3 모델 우위 시점 일관성 (사후 탐색): 따로 모델을 둘 만한 군이 있는가 → outputs/p2v3/consistency/ (PLAN_P2_v3 §12)
 p2v3-consistency: p2v3-group
 	$(PY) -W ignore -m pbd.forecast_v3.consistency
+
+# P2 v3 실험 (PLAN_P2_v3 §13, 사전등록 r2). smoke = 잠금 전 동작 확인(2022, ATC 1단계 P·R, B3 캐시 확인, 오차 숫자 출력 안 함)
+p2v3-exp-smoke:
+	$(PY) -m pytest -q tests/test_p2v3_exp.py
+	$(PY) -W ignore -m pbd.forecast_v3.exp --smoke
+
+# 본 실행: 태그 p2v3-prereg-r2와 잠금 파일·B3 캐시 해시가 같을 때만 → outputs/p2v3/exp/, reports/P2v3_exp_result.md
+p2v3-exp:
+	$(PY) -m pytest -q tests/test_p2v3_exp.py
+	$(PY) -W ignore -m pbd.forecast_v3.exp

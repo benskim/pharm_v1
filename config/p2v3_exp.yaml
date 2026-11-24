@@ -1,0 +1,28 @@
+# P2 v3 실험 설정 (docs/PLAN_P2_v3.md §13, 사전등록 r2). 태그 p2v3-prereg-r2 뒤에는 바꾸지 않는다.
+# 대상·가중치·G·B3 설정은 P2 v2 그대로(outputs/p2v2/target.csv, src/pbd/forecast_v2/). seed는 config/params.yaml.
+
+tag: "p2v3-prereg-r2"
+groups_file: "config/p2v3_groups.csv"
+group_features_file: "config/p2v3_group_features.csv"   # atc2_54 군의 2018-01 ~ 2022-07 계절성 강도·겨울/여름 비율 중앙값
+h: 6
+eval: ["2023-01", "2025-12"]
+r1: ["2024-01", "2025-12"]        # 견고성 R1: 2023(기준 해 이상) 제외
+r2: ["2023-01", "2024-10"]        # 견고성 R2: 덜 집계 가능(2024-11 ~ 2025-12) 제외
+delta: 0.005                       # 금액 가중 WAPE 절대 0.5%p
+alpha: 0.05
+arms_main: ["E1", "E2"]            # 각각 대 G, Holm(2)
+e1:
+  lower: atc2_69                   # 줄임 아래 단계(위 단계 = 첫 글자 = ATC 1단계 → 전체)
+  window: 12                       # 대상월 τ ∈ [a − 11, a]
+  min_cells: 6                     # 창 안 칸이 이보다 적은 성분은 가중치 추정에서 뺌(가중치는 군 값으로 받음)
+  blend: linear                    # ŷ = (1 − α)·G + α·B3, α ∈ {0, 0.1, …, 1}, 같으면 작은 α
+b3:                                # B3(ETS): P2 v2 백테스트 예측을 캐시로 재사용(사용자 승인 2026-11-24)
+  fresh_until: "2022-01"           # 대상월 ≤ 이 달은 새로 적합(P2 v2 ETS 코드 그대로), 그 뒤는 캐시
+  cache: "outputs/p2v2/backtest/predictions.csv"
+  cache_sha256: "761c0e586366c3ed63643fc7c31627917383749499eed89dde1edcf6c10e2e0a"
+  check_month: "2022-01"           # 새 적합 = 캐시 확인(결측 모양 같음, 최대 상대 차이 ≤ 1e-9). 어긋나면 멈춤
+smoke:                             # 잠금 전 동작 확인: 평가 기간 밖, 일부 성분, 오차 숫자 출력 안 함
+  eval: ["2022-01", "2022-12"]
+  r1: ["2022-07", "2022-12"]       # 동작 확인용 창(의미 없음)
+  r2: ["2022-01", "2022-06"]
+  atc1: ["P", "R"]                 # 47개 성분(빠른 확인)
