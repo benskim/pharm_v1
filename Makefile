@@ -5,7 +5,7 @@ export PYTHONPATH := src
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
         p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 p1-build all p1-holdout-v53 \
-        p2v2-select p2v2-power p2v2-ewc-check p2v2-power-ewc p2v2-dryrun p2v2-rho p2v2-prereg-check p2v2-backtest p2v3-group p2v3-regroup p2v3-hybrid p2v3-pooling p2v3-consistency p2v3-exp-smoke p2v3-exp p2v4-smoke p2v4
+        p2v2-select p2v2-power p2v2-ewc-check p2v2-power-ewc p2v2-dryrun p2v2-rho p2v2-prereg-check p2v2-backtest p2v3-group p2v3-regroup p2v3-hybrid p2v3-pooling p2v3-consistency p2v3-exp-smoke p2v3-exp p2v4-smoke p2v4 p2v4-resp
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -229,3 +229,8 @@ p2v4-smoke:
 p2v4:
 	$(PY) -m pytest -q tests/test_p2v4.py
 	$(PY) -W ignore -m pbd.forecast_v4.run
+
+# P2 v4 호흡기 성분 성능 저하 분석 (사후 탐색, P2 v4 결과·캐시를 읽기만 함) → outputs/p2v4_resp/
+p2v4-resp:
+	$(PY) -m pytest -q tests/test_p2v4_resp.py
+	$(PY) -W ignore scripts/p2v4_resp_analysis.py
