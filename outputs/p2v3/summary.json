@@ -1,0 +1,38 @@
+{
+ "n_cells": 16486,
+ "n_ingr": 496,
+ "n_target_without_cells": 5,
+ "repro_wape_pct": {
+  "G": 6.46,
+  "B3": 7.11,
+  "B1": 9.76,
+  "B2": 45.3
+ },
+ "atc_link": {
+  "code_map_rows": 309889,
+  "std_code_len13": 309889,
+  "benefit_2025_12_products": 21757,
+  "benefit_2025_12_matched_by_std": 21756,
+  "old_path_mapped": 490,
+  "new_path_mapped": 501,
+  "both_mapped": 490,
+  "both_same_atc2": 487
+ },
+ "n_raw_groups": {
+  "cls2": 23,
+  "atc2": 69
+ },
+ "atc2_unmapped": 0,
+ "atc2_multi": 47,
+ "atc2_tie": 4,
+ "pattern_missing": 61,
+ "yoy_missing": 61,
+ "n_groups": {
+  "cls2": 22,
+  "atc2": 54
+ },
+ "n_groups_large": {
+  "cls2": 21,
+  "atc2": 54
+ }
+}

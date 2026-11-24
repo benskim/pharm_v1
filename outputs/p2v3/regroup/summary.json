@@ -1,0 +1,19 @@
+{
+ "ks": [
+  4,
+  6,
+  8,
+  14,
+  22
+ ],
+ "n_atc1": 14,
+ "n_cls2": 22,
+ "n_atc2": 54,
+ "n_perm": 999,
+ "pre_window": [
+  "2018-01",
+  "2022-07"
+ ],
+ "pre_pattern_missing": 0,
+ "pre_pattern_missing_w": 0.0
+}

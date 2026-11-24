@@ -5,7 +5,7 @@ export PYTHONPATH := src
 .PHONY: help venv sample s0 check-sample test p1-all \
         p1-s1 p1-s2 p1-s3 p1-v4-legacy p1-v5 p1-s4 p1-s4-precision p1-s5 p1-s6 p1-s7 report \
         p2-t1 p2-t2 p2-t3 p2-diag p2-extra p2-min p2-t4 p2-t5 p1-build all p1-holdout-v53 \
-        p2v2-select p2v2-power p2v2-ewc-check p2v2-power-ewc p2v2-dryrun p2v2-rho p2v2-prereg-check p2v2-backtest
+        p2v2-select p2v2-power p2v2-ewc-check p2v2-power-ewc p2v2-dryrun p2v2-rho p2v2-prereg-check p2v2-backtest p2v3-group p2v3-regroup p2v3-hybrid p2v3-pooling p2v3-consistency
 
 help:
 	@echo "make venv | sample | s0 | check-sample | test | p1-s1..p1-s7 | p1-v5 | report MONTH=YYYY-MM | p2-t1..p2-t5 | all"
@@ -188,3 +188,25 @@ p2v2-prereg-check:
 # 실제 자료 백테스트 (태그 p2v2-prereg-r1과 잠금 파일이 같을 때만. 태그가 없으면 거부)
 p2v2-backtest:
 	$(PY) -m pbd.forecast_v2.real
+
+# P2 v3 (P2 첨부 별도 분석, 사후 탐색): 약효분류 2자리·ATC 2단계 분류군별 오차와 사용 패턴 → outputs/p2v3/ (docs/PLAN_P2_v3.md)
+p2v3-group:
+	$(PY) -m pytest -q tests/test_p2v3_group.py
+	$(PY) -m pbd.forecast_v3.run
+	$(PY) -m pbd.forecast_v3.report
+
+# P2 v3 다시 묶기 (사후 탐색): ATC 1단계·패턴 군집으로 묶으면 군간 차이가 커지는가 → outputs/p2v3/regroup/ (PLAN_P2_v3 §9)
+p2v3-regroup: p2v3-group
+	$(PY) -m pbd.forecast_v3.regroup
+
+# P2 v3 혼합 묶음 (사후 탐색): ATC 2단계 군을 ATC 1단계 안에서만 골라 합치는 방식 비교 → outputs/p2v3/hybrid/ (PLAN_P2_v3 §10)
+p2v3-hybrid: p2v3-regroup
+	$(PY) -W ignore -m pbd.forecast_v3.hybrid
+
+# P2 v3 부분 풀링 (사후 탐색): 딱 잘라 나눈 묶음과 '한 성분 빼고 맞히기'로 비교 → outputs/p2v3/pooling/ (PLAN_P2_v3 §11)
+p2v3-pooling: p2v3-hybrid
+	$(PY) -W ignore -m pbd.forecast_v3.pooling
+
+# P2 v3 모델 우위 시점 일관성 (사후 탐색): 따로 모델을 둘 만한 군이 있는가 → outputs/p2v3/consistency/ (PLAN_P2_v3 §12)
+p2v3-consistency: p2v3-group
+	$(PY) -W ignore -m pbd.forecast_v3.consistency
