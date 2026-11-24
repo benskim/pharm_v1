@@ -1,0 +1,37 @@
+# P2 v4 설정 (docs/PLAN_P2_v4.md, 사전등록 r1). 태그 p2v4-prereg-r1 뒤에는 바꾸지 않는다. seed는 config/params.yaml.
+tag: "p2v4-prereg-r1"
+h: 6
+target_file: "outputs/p2v2/target.csv"
+target_sha256: "064cd52454ca265580c515bb39a709860de86c0da02c02c5d3b931d30c3dc82c"
+eval: ["2023-01", "2025-12"]
+first_tau: "2021-07"               # 계수 추정 24행(min_rows)이 되는 첫 대상월 (2018-01 시작, h = 6)
+r1: ["2024-01", "2025-12"]         # 2023 제외
+r2: ["2023-01", "2024-10"]         # 덜 집계 가능 기간 제외
+delta: 0.005
+fallback_max: 0.10                 # W의 B2 대체 칸 가중치 몫이 넘으면 W 대 B3는 판단 보류
+s2_max_abs_r: 0.3                  # 가정값
+beta:
+  huber_k: 1.345
+  min_rows: 24
+center_wd: 22                      # 근무일수에서 빼는 상수
+temp_holidays: ["2020-08-17", "2023-10-02", "2024-10-01", "2025-01-27", "2025-06-03"]   # 예측 달에서만 '모름'(근무일)으로 되돌릴 날
+interval:
+  window: 24
+  min_obs: 6
+  levels: [0.90, 0.80]             # 첫 값이 주 수준
+  cover_all: [0.87, 0.93]          # 가정값
+  cover_year: [0.85, 0.95]         # 가정값
+grades: [0.10, 0.30]               # 위험 등급 경계(90% 위쪽 반폭), 가정값
+b3:
+  cache: "outputs/p2v2/backtest/predictions.csv"
+  cache_sha256: "761c0e586366c3ed63643fc7c31627917383749499eed89dde1edcf6c10e2e0a"
+  fresh_until: "2022-01"
+  check_month: "2022-01"
+ets_cache: "outputs/p2v4/cache/ets.sqlite"   # 내용 해시 열쇠. 다시 실행하면 같은 계열은 다시 적합하지 않음
+cache_recheck: 20                  # 캐시에서 온 값 중 무작위로 다시 적합해 대조할 개수
+smoke:                             # 평가 기간 밖, 일부 성분. 오차 숫자를 내지 않음
+  eval: ["2022-01", "2022-12"]
+  r1: ["2022-07", "2022-12"]
+  r2: ["2022-01", "2022-06"]
+  groups_file: "config/p2v3_groups.csv"
+  atc1: ["P", "R"]

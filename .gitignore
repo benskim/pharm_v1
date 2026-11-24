@@ -34,3 +34,5 @@ data/temp/
 # P2 v3 실험 사전등록 r2 잠금 파일(군 배정·군 패턴 특징, 2026-11-24). 잠금 확인이 태그에서 읽는다
 !config/p2v3_groups.csv
 !config/p2v3_group_features.csv
+# P2 v4 ETS 적합 캐시
+outputs/p2v4/cache/
