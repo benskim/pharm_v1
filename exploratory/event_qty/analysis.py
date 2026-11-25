@@ -1,4 +1,4 @@
-"""사건(약가인하·경쟁제품 추가·대체조제 목록 추가) 전후 성분 원외 처방수량 변화 (2026-11-25 사용자 지시).
+"""[보류, 핵심 분석 경로 밖] 사건(약가인하·경쟁제품 추가·대체조제 목록 추가) 전후 성분 원외 처방수량 변화 (2026-11-25 사용자 지시).
 
 규칙은 결과를 보기 전에 정했다 (docs/DECISIONS.md 2026-11-25).
 - 단위: 성분4 × 전국 × 월, 원외 청구수량. 사건 달 m = 유효일이 속한 달(대체조제 목록 추가는 처음 보인 달).
@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "outputs" / "event_qty"
 CUT = -0.01  # 제품 수 가중 평균 상한금액 변화 1% 이상 인하
 OTHER = {"P": ["E", "S"], "E": ["P", "S"], "S": ["P", "E"], "S_ex": ["P", "E"]}
@@ -200,7 +200,7 @@ def main():
     pd.DataFrame(drops).to_csv(OUT / "event_drops.csv", index=False)
     au = pd.DataFrame(L["audit"], columns=["type", "w", "shift", "c4", "t", "reason"])
     au = au[(au.w == 6) & (au["shift"] == 0)].assign(month=lambda x: (x.t // 12).astype(str) + "-" + (x.t % 12 + 1).astype(str).str.zfill(2))
-    au[["type", "month", "c4", "reason"]].drop_duplicates().to_csv(ROOT / "outputs/audit/dropped_event_qty.csv", index=False)
+    au[["type", "month", "c4", "reason"]].drop_duplicates().to_csv(OUT / "dropped_event_qty.csv", index=False)
     a = pd.concat(cells_out)
     a[a.treat == 1].sort_values(["type", "t", "c4"]).to_csv(OUT / "event_cells.csv", index=False)
     pd.set_option("display.width", 220, "display.max_columns", 20, "display.max_rows", 99)

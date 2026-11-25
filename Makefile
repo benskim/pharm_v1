@@ -235,11 +235,6 @@ p2v4-resp:
 	$(PY) -m pytest -q tests/test_p2v4_resp.py
 	$(PY) -W ignore scripts/p2v4_resp_analysis.py
 
-# 사건(약가인하·경쟁제품 추가·대체조제 목록 추가) 전후 성분 처방수량 변화 → outputs/event_qty/
-event-qty:
-	$(PY) -m pytest -q tests/test_event_qty.py
-	$(PY) -W ignore scripts/event_qty_analysis.py
-
 # P2 진단 (사후 탐색): S01·R03·J01·R05 오차의 구성 → outputs/p2_diag/ (docs/PLAN_P2_diag.md)
 .PHONY: p2-diag-vol
 p2-diag-vol:

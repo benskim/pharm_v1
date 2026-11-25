@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-_s = importlib.util.spec_from_file_location("eq", Path(__file__).resolve().parents[1] / "scripts/event_qty_analysis.py")
+_s = importlib.util.spec_from_file_location("eq", Path(__file__).resolve().parent / "analysis.py")
 eq = importlib.util.module_from_spec(_s); _s.loader.exec_module(eq)
 
 
