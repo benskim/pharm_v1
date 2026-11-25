@@ -239,3 +239,10 @@ p2v4-resp:
 event-qty:
 	$(PY) -m pytest -q tests/test_event_qty.py
 	$(PY) -W ignore scripts/event_qty_analysis.py
+
+# P2 진단 (사후 탐색): S01·R03·J01·R05 오차의 구성 → outputs/p2_diag/ (docs/PLAN_P2_diag.md)
+.PHONY: p2-diag-vol
+p2-diag-vol:
+	$(PY) -m pytest -q tests/test_p2_diag.py
+	$(PY) -W ignore scripts/p2_diag_volatile.py
+	$(PY) -W ignore scripts/p2_diag_covid.py
